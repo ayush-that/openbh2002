@@ -18,19 +18,24 @@ export function raw24Size(name: string, byteLength: number): { width: number; he
   return { width, height }
 }
 
-export function decodeRaw24(name: string, data: Uint8Array): RawImage {
+/** Pass width/height when known (Geometry.3D texture table); otherwise they are inferred from the name. */
+export function decodeRaw24(name: string, data: Uint8Array, width?: number, height?: number): RawImage {
+  if (width && height) {
+    if (data.byteLength < width * height * 3) throw new Error(`${name}: ${data.byteLength} bytes is less than ${width}x${height}x3`)
+    return { width, height, rgb: data }
+  }
   return { ...raw24Size(name, data.byteLength), rgb: data }
 }
 
-/** Expand to RGBA. Black (0,0,0) becomes transparent when colorKey is set (sprites/effects). */
+/** Expand to RGBA. With colorKey, pure black (0,0,0) becomes fully transparent, as in D3D7 source color keying. */
 export function toRGBA(img: RawImage, colorKey = false): Uint8Array {
   const out = new Uint8Array(img.width * img.height * 4)
-  for (let i = 0, j = 0; i < img.rgb.length; i += 3, j += 4) {
+  for (let i = 0, j = 0, n = img.width * img.height * 3; i < n; i += 3, j += 4) {
     const r = img.rgb[i], g = img.rgb[i + 1], b = img.rgb[i + 2]
     out[j] = r
     out[j + 1] = g
     out[j + 2] = b
-    out[j + 3] = colorKey ? Math.max(r, g, b) : 255
+    out[j + 3] = colorKey && r === 0 && g === 0 && b === 0 ? 0 : 255
   }
   return out
 }

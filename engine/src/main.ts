@@ -1,11 +1,13 @@
 import * as THREE from 'three/webgpu'
 import './style.css'
 import { openDevFS, openPickedFS, type GameFS } from './vfs'
+import { parseGeometry3D, type Geometry3D } from './formats/geometry3d'
+import { G3DScene } from './render/g3dscene'
 import { Terrain } from './world/terrain'
-import { Sky } from './world/sky'
 import { FlyCam } from './debug/flycam'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
+const params = new URLSearchParams(location.search)
 
 function pickFolder(): Promise<GameFS> {
   app.innerHTML = `
@@ -29,6 +31,21 @@ function pickFolder(): Promise<GameFS> {
   })
 }
 
+/** Which Geometry.3D objects are part of the static scene. Everything else is a pooled runtime object. */
+function staticIds(geo: Geometry3D, night: boolean) {
+  const ids = new Set<number>([night ? 9 : 8, 19, 20, 21, 22, 532, night ? 534 : 533, 535])
+  for (let id = 10; id <= 18; id++) ids.add(id)
+  // Keep ancestors visible so children can show.
+  for (const id of [...ids]) {
+    let o = geo.objects[id]
+    while (o?.parent != null) {
+      ids.add(o.parent)
+      o = geo.objects[o.parent]
+    }
+  }
+  return ids
+}
+
 async function start(fs: GameFS) {
   app.innerHTML = ''
   const renderer = new THREE.WebGPURenderer({ antialias: true })
@@ -37,20 +54,46 @@ async function start(fs: GameFS) {
   renderer.setSize(innerWidth, innerHeight)
   app.appendChild(renderer.domElement)
 
-  const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x5a7cc0)
-  scene.fog = new THREE.Fog(0x9fb4d8, 150, 800)
-  scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x6b5a3a, 1.2))
-  const sun = new THREE.DirectionalLight(0xffffff, 2)
-  sun.position.set(1, 2, 0.5)
-  scene.add(sun)
+  const night = params.get('time') === 'night'
+  let remaster = params.get('mode') === 'remaster'
 
-  const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 4000)
-  const [terrain, sky] = await Promise.all([Terrain.load(fs), Sky.load(fs)])
-  scene.add(terrain.group, sky.group)
-  camera.position.set(0, terrain.heightAt(0, 0) + 40, 120)
-  camera.lookAt(0, terrain.heightAt(0, 0), 0)
+  const geo = parseGeometry3D(await fs.text('BH2Game/Geometry.3D'))
+  const [g3d, terrain] = await Promise.all([G3DScene.load(fs, geo), Terrain.load(fs)])
+
+  const scene = new THREE.Scene()
+  scene.background = new THREE.Color(night ? 0x02040a : 0x5a7cc0)
+  scene.add(g3d.root, terrain.group)
+
+  // PROVISIONAL: SandBags are modeled at y 0..106 but the ground at the origin is ~608, so the game must lift them.
+  g3d.node(532).position.y = terrain.heightAt(0, 0)
+
+  const visible = staticIds(geo, night)
+  for (const [id, node] of g3d.nodes) node.visible = visible.has(id)
+
+  // Lighting from Geometry.3D object 0 (LightDistant). Ambient level is PROVISIONAL.
+  const sunDef = geo.objects[0].lights.find((l) => l.type === 'distant')
+  const sun = new THREE.DirectionalLight(0xffffff, sunDef ? sunDef.intensity / 255 : 1)
+  if (sunDef) sun.position.set(...sunDef.direction).normalize()
+  scene.add(sun, new THREE.AmbientLight(0xffffff, night ? 0.25 : 0.55))
+
+  const applyMode = () => {
+    for (let id = 10; id <= 18; id++) g3d.node(id).visible = !remaster
+    terrain.group.visible = remaster
+  }
+  applyMode()
+  addEventListener('keydown', (e) => {
+    if (e.code === 'KeyT') {
+      remaster = !remaster
+      applyMode()
+    }
+  })
+
+  // PROVISIONAL camera: at the weapon Mount (0, 800, 0), looking north (-Z). FOV pending RE.
+  const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 5, 80000)
+  camera.position.set(0, 860, 40)
   const fly = new FlyCam(camera, renderer.domElement)
+  fly.speed = 1500
+  fly.lookAt(0, 800, -1000)
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight
@@ -62,10 +105,9 @@ async function start(fs: GameFS) {
   renderer.setAnimationLoop(() => {
     timer.update()
     fly.update(Math.min(timer.getDelta(), 0.1))
-    sky.follow(camera)
     renderer.render(scene, camera)
   })
-  Object.assign(window, { __bh: { renderer, scene, camera, terrain, fly, sky, backend: renderer.backend.constructor.name } })
+  Object.assign(window, { __bh: { renderer, scene, camera, terrain, g3d, fly, geo, backend: renderer.backend.constructor.name } })
 }
 
 start((await openDevFS()) ?? (await pickFolder())).catch((e) => {
