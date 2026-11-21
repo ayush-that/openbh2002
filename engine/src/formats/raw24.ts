@@ -7,10 +7,21 @@ export interface RawImage {
   rgb: Uint8Array
 }
 
+/**
+ * Integer upscale factor k of a higher-resolution copy: `byteLength` is exactly `bytes` x k x k (k >= 2).
+ * 1 for original files. UVs are normalised, so a k-times larger texture drops in unchanged.
+ */
+export function rawScale(byteLength: number, bytes: number) {
+  const k = Math.round(Math.sqrt(byteLength / bytes))
+  return k >= 2 && bytes * k * k === byteLength ? k : 1
+}
+
 export function raw24Size(name: string, byteLength: number): { width: number; height: number } {
   const m = /(\d+)\.?x(\d+)\.[tr]24$/i.exec(name)
   const [width, height] = m ? [+m[1], +m[2]] : [256, 256]
   if (width * height * 3 !== byteLength) {
+    const k = rawScale(byteLength, width * height * 3)
+    if (k > 1) return { width: width * k, height: height * k }
     const side = Math.sqrt(byteLength / 3)
     if (Number.isInteger(side)) return { width: side, height: side }
     throw new Error(`${name}: ${byteLength} bytes does not match ${width}x${height}x3`)
@@ -22,7 +33,8 @@ export function raw24Size(name: string, byteLength: number): { width: number; he
 export function decodeRaw24(name: string, data: Uint8Array, width?: number, height?: number): RawImage {
   if (width && height) {
     if (data.byteLength < width * height * 3) throw new Error(`${name}: ${data.byteLength} bytes is less than ${width}x${height}x3`)
-    return { width, height, rgb: data }
+    const k = rawScale(data.byteLength, width * height * 3)
+    return { width: width * k, height: height * k, rgb: data }
   }
   return { ...raw24Size(name, data.byteLength), rgb: data }
 }

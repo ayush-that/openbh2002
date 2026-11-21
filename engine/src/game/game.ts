@@ -66,7 +66,10 @@ export class Game {
   /** Full per-level reset, like FUN_00429201. */
   startLevel(n: number) {
     const w = this.world
-    const text = this.levels.get(n) ?? this.levels.get((n % 10) + 91)
+    // Above 99 the original loads Level_(n%10 + 91), so 109, 119, ... ask for the missing Level_100 and crash.
+    // Deliberate deviation: those levels play Level_99 instead.
+    const file = n > 99 ? (n % 10) + 91 : n
+    const text = this.levels.get(file) ?? (file === 100 ? this.levels.get(99) : undefined)
     if (!text) throw new Error(`Level ${n} not found`)
     const level = parseLevel(text)
     w.levelNumber = n

@@ -36,6 +36,8 @@ Sound engine loops: `airEngineDistances(world)` (install-air.ts) returns `{ jet,
 - Ground height is the bilinear `world.groundY` (original: nearest heightmap byte x 8), 0 off the ±15000 map for crash tests.
 - Per-slot rates are zeroed on spawn (the original keeps stale values from a previous life of the slot).
 - A crate ring slot reused while still in the air moves to the new parachute; the old parachute disappears when it lands (original: it falls forever, invisible).
+- The 64-slot parachute ring can wrap onto a paratrooper still in the air (C130 crate runs with `passes` 127 do this). BH2.exe allocates the trooper as a soldier at drop time, so he survives; here the soldier is spawned at that moment and falls on his own (`soldiers.spawn(..., { paratrooper: true })`). Before, he vanished and the enemy meter could never reach 0.
+- Read-only helpers for tools (the E2E bot): `Parachutes.payloadAt(slot)`, `Parachutes.predict(slot, frames, local)`, `AirSystem.c130Load(slot)`.
 - Crash smoke uses `smokeBlack` (which billboard the 0x447d40 particles use is not confirmed).
 - Jet crash roll velocity is applied as a fixed roll offset: the original AI rewrites roll every frame, so the spin never accumulates.
 

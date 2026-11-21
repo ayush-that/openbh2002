@@ -485,10 +485,10 @@ export class AirSystem implements EnemySystem {
       }
     }
     if (t === 4) {
-      this.parachutes.drop(c.pos, c.yaw, 'soldier')
+      this.parachutes.drop(w, c.pos, c.yaw, 'soldier')
       s.troops1--
     } else {
-      this.parachutes.drop(c.pos, c.yaw, t as CrateKind)
+      this.parachutes.drop(w, c.pos, c.yaw, t as CrateKind)
       s.drops[t]--
     }
     c.counter = 8
@@ -1122,6 +1122,16 @@ export class AirSystem implements EnemySystem {
       if (c.state < 8) w.reduceEnemyMeter(6)
       c.state = 0xd
     }
+  }
+
+  /** Read-only, for tools (the E2E bot): troops and crates still aboard the C130 at this target slot. */
+  c130Load(slot: number): { troops: number; crates: number } | null {
+    const c = this.bySlot.get(slot)
+    if (!c || c.type !== 'C130') return null
+    const s = c.c130
+    // Before the drop zone a pass will reload `load`; once dropping, `drops` is what is left.
+    const crates = (c.state <= 2 ? s.load : s.drops).reduce((a, b) => a + b, 0)
+    return { troops: this.troopsAboard(c), crates: c.state >= 4 && c.state !== 3 ? (s.passes > 1 ? s.load.reduce((a, b) => a + b, 0) : 0) : crates }
   }
 
   private troopsAboard(c: Craft) {

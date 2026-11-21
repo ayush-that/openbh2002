@@ -54,10 +54,16 @@ export class Parachutes {
   }
 
   /** C130 drop: a parachute at the plane, pitched 45 deg, carrying a paratrooper or a crate. */
-  drop(pos: THREE.Vector3, yaw: number, payload: 'soldier' | CrateKind) {
+  drop(world: World, pos: THREE.Vector3, yaw: number, payload: 'soldier' | CrateKind) {
     const i = this.next
     this.next = (this.next + 1) % POOL
     const c = this.chutes[i]
+    if (c.active && c.payload < 0) {
+      // The ring wraps onto a paratrooper still in the air. In BH2.exe the trooper is a soldier allocated at drop time
+      // that survives the parachute reuse, so he must not vanish (the enemy meter counts him): let him fall on his own.
+      _p.set(0, -300, 0).applyMatrix4(c.node.matrix)
+      world.soldiers.spawn(world, _p.clone(), c.yaw, { paratrooper: true })
+    }
     c.active = true
     c.pos.copy(pos)
     c.yaw = yaw
@@ -111,6 +117,26 @@ export class Parachutes {
     c.node.updateMatrix()
     crate.position.copy(_p.set(0, -250, 0).applyMatrix4(c.node.matrix))
     crate.quaternion.copy(c.node.quaternion)
+  }
+
+  /** Read-only, for tools (the E2E bot): where local point `local` of the parachute at `slot` will be in `frames` frames. */
+  predict(slot: number, frames: number, local: THREE.Vector3, out = new THREE.Vector3()) {
+    const c = this.chutes[slot - PARACHUTE_FIRST]
+    if (!c) return out.set(0, 0, 0)
+    let pitch = c.pitch, swing = c.swing
+    for (let f = 0; f < frames; f++) {
+      swing = -pitch * 0.008 + swing * 0.992
+      pitch += swing
+    }
+    const e = new THREE.Euler(pitch * deg, c.yaw * deg, 0, 'YXZ')
+    return out.copy(local).applyEuler(e).add(c.pos).setY(out.y - 10 * frames)
+  }
+
+  /** Read-only, for tools (the E2E bot): what shooting the parachute at this target slot gives, or 'trooper'. */
+  payloadAt(slot: number): 'trooper' | (typeof PRIZE)[number] | 'none' {
+    const i = slot - PARACHUTE_FIRST, c = this.chutes[i]
+    if (!c || c.payload < 0) return 'trooper'
+    return c.payload !== 15 ? PRIZE[c.payload >> 2] : 'none'
   }
 
   private target(c: Chute, i: number): Target {

@@ -193,12 +193,20 @@ export class GroundSystem implements EnemySystem {
     return out
   }
 
+  /** Read-only, for tools (the E2E bot): vehicle type and whether troops are still aboard, by target slot. */
+  vehicleAt(slot: number): { kind: Kind; troops: boolean } | null {
+    const v = this.vehicles.find((x) => x.id === slot)
+    return v ? { kind: v.kind, troops: v.troops } : null
+  }
+
   private target(v: Vehicle): Target {
     return {
       slot: v.id,
       shape: v.tank ? 'tank' : 'apc',
       node: v.hull,
       alive: () => v.active,
+      wrecked: () => v.active && v.tank && v.state === 0,
+      engineOn: () => v.active && v.state !== 0,
       hit: (w, _zone, weapon, point) => {
         // Bullets only flash on tanks and APCs; any shell or missile destroys them.
         if (weapon === 'bullet') w.effects.spawn('explodeF', point.clone(), { scale: 1 })

@@ -1,7 +1,9 @@
 import * as THREE from 'three/webgpu'
 import type { GameFS } from '../../vfs'
+import { decodeRaw24, rawScale } from '../../formats/raw24'
 import { deg } from '../constants'
 import type { Soldiers, World } from '../world'
+import type { Projectile } from '../projectiles'
 
 // The 96-soldier pool (objects 0x166-0x1c5 = Geometry.3D 358..453): walking, strafing, rifle and grenade
 // attacks, burning and deaths from FUN_004051c8 (decomp L4894-6052), plus the hit handling that lives in
@@ -69,6 +71,9 @@ export class SoldierPool implements Soldiers {
   /** DAT_00447d20: next pool index, reset per level. */
   private next = 0
   private nextFire = 0
+  /** Grenades live in an 8-slot ring (0x462ee0, DAT_00447870): a 9th throw replaces the oldest. */
+  private grenades: (Projectile | null)[] = new Array(8).fill(null)
+  private nextGrenade = 0
   private frameCount = 0
   private atlasW = COLS * FRAME
   private atlasH = FRAME
@@ -117,17 +122,22 @@ export class SoldierPool implements Soldiers {
     const files = await Promise.all(films.map((f) => fs.read(`BH2Game/${f.file}`)))
     this.frameCount = films.reduce((n, f) => n + f.frameCount, 0)
     this.atlasH = Math.ceil(this.frameCount / COLS) * FRAME
-    const W = this.atlasW, H = this.atlasH
+    // Higher-resolution copies (every dimension, including the unused rows of each frame, times an integer)
+    // fill a proportionally larger atlas; UVs stay in atlasW/atlasH units.
+    const scales = films.map((film, k) => rawScale(files[k].byteLength, film.width * film.rowsPerFrameInFile * film.frameCount * 3))
+    const K = Math.min(...scales), C = FRAME * K
+    const W = this.atlasW * K, H = this.atlasH * K
     const rgba = new Uint8Array(W * H * 4)
     let f = 0
     films.forEach((film, k) => {
-      const data = files[k], rowBytes = film.width * 3, frameBytes = rowBytes * film.rowsPerFrameInFile
+      const fk = scales[k], step = fk / K
+      const data = files[k], rowBytes = film.width * fk * 3, frameBytes = rowBytes * film.rowsPerFrameInFile * fk
       for (let i = 0; i < film.frameCount; i++, f++) {
-        const ox = (f % COLS) * FRAME, oy = Math.floor(f / COLS) * FRAME
+        const ox = (f % COLS) * C, oy = Math.floor(f / COLS) * C
         // Only the first `height` rows of each frame are uploaded (Film keyword).
-        for (let y = 0; y < film.height; y++) {
-          for (let x = 0; x < film.width; x++) {
-            const s = i * frameBytes + y * rowBytes + x * 3, d = ((oy + y) * W + ox + x) * 4
+        for (let y = 0; y < film.height * K; y++) {
+          for (let x = 0; x < film.width * K; x++) {
+            const s = i * frameBytes + y * step * rowBytes + x * step * 3, d = ((oy + y) * W + ox + x) * 4
             const r = data[s], g = data[s + 1], b = data[s + 2]
             rgba[d] = r
             rgba[d + 1] = g
@@ -145,8 +155,7 @@ export class SoldierPool implements Soldiers {
 
     const fire = world.g3d.geo.animations.find((a) => a.kind === 'Animated' && a.set === 3)
     if (!fire) return
-    const img = await fs.read(`BH2Game/${fire.file}`)
-    const fw = fire.width, fh = fire.height * fire.frameCount
+    const { width: fw, height: fh, rgb: img } = decodeRaw24(fire.file, await fs.read(`BH2Game/${fire.file}`), fire.width, fire.height * fire.frameCount)
     const frgba = new Uint8Array(fw * fh * 4)
     for (let i = 0, j = 0; i < fw * fh * 3; i += 3, j += 4) {
       frgba[j] = img[i]
@@ -162,6 +171,8 @@ export class SoldierPool implements Soldiers {
   reset() {
     this.next = 0
     this.nextFire = 0
+    this.grenades.fill(null)
+    this.nextGrenade = 0
     for (const s of this.list) {
       s.active = false
       s.node.visible = false
@@ -176,8 +187,10 @@ export class SoldierPool implements Soldiers {
   /** Allocate like DAT_00447d20 (sequential, never wraps in the original). */
   private alloc(): Soldier | null {
     if (this.next < COUNT) return this.list[this.next++]
-    // Deviation: BH2.exe would run past the pool into the crate objects; reuse a free slot instead.
-    return this.list.find((s) => !s.active) ?? null
+    // Deviation: BH2.exe would run past the pool into the crate objects; reuse a free slot instead. Corpses (state 0)
+    // stay active until the player looks up (> 20 deg pitch), so after 96 spawns the pool is usually full of them:
+    // reuse a corpse too, otherwise every later soldier is dropped and the enemy meter can never reach 0.
+    return this.list.find((s) => !s.active) ?? this.list.find((s) => s.state === 0) ?? null
   }
 
   /**
@@ -187,7 +200,12 @@ export class SoldierPool implements Soldiers {
    */
   spawn(world: World, p: THREE.Vector3, yaw: number, opts: { paratrooper?: boolean; stagger?: number } = {}) {
     const s = this.alloc()
-    if (!s) return
+    if (!s) {
+      // All 96 alive: BH2.exe would write past the pool and the soldier would never be simulated, leaving the enemy
+      // meter stuck above 0. Deviation: count him as gone so the level stays winnable.
+      world.reduceEnemyMeter(1)
+      return
+    }
     s.active = true
     s.x = p.x
     s.y = p.y
@@ -608,7 +626,10 @@ export class SoldierPool implements Soldiers {
     const tz = (w.rand() >> 6) - 256 - s.z
     const v = speed < 0 ? (w.rand() >> 11) + 20 : speed
     const k = v / (Math.hypot(tx, ty, tz) || 1)
-    w.projectiles.fire('grenade', _v.set(s.x, s.y + 120, s.z), new THREE.Vector3(tx * k, ty * k, tz * k))
+    const old = this.grenades[this.nextGrenade]
+    if (old) old.dead = true
+    this.grenades[this.nextGrenade] = w.projectiles.fire('grenade', _v.set(s.x, s.y + 120, s.z), new THREE.Vector3(tx * k, ty * k, tz * k))
+    this.nextGrenade = (this.nextGrenade + 1) & 7
   }
 
   private pose(w: World) {

@@ -24,7 +24,7 @@ const ground = installGround(world, fs) // before game.startLevel(...)
 - **APC2**: gun attack with the tank aggression chance. It fires a 4-round burst (frames 20/18/16/14) of `'bullet'` from gun + fwd x 201 at 500 u/f. The original plays no sound and shows no muzzle flash for this.
 - **APC3**: rockets only. The original excludes APC3 from the gun attack (`local_6c < 0x51`). Chance is 4/512 while ammo > 0; it aims at (0,840,0) and fires one `'apcRocket'` per attack (life 130, 280 u/f), 2 in total. The loaded rockets are MISSILE instances 472..479, posed on the launcher at (∓48, 0, 65) until fired. The radar spins 4..11 deg/frame.
 - **Damage** (`Target.hit`): bullets only spawn ExplodeF at scale 1.
-  - Tank hit by a shell or missile: ExplodeF at scale 4 and `ExFar`. If the tank was live: meter -10, barrel at -20, decelerate, and the turret is thrown (vy 40, xz ±16.4, spin ±2.05, gravity 3, drag 0.98, gone below y 0). The wreck stays active and still stops shots.
+  - Tank hit by a shell or missile: ExplodeF at scale 4 and `ExFar`. If the tank was live: meter -10, barrel at -20, decelerate, and the turret is thrown (vy 40, xz ±16.4, spin ±2.05, gravity 3, drag 0.98, gone below y 0). The wreck stays active and still stops shots, so `alive()` stays true; `Target.wrecked()` is true for it and `Target.engineOn()` is false (also for a parked APC1, state 0), so the engine loops and the E2E bot ignore it.
   - APC: burn event (600), meter -6 if troops are still aboard, plus -5 for APC2/3. All parts are hidden. ExplodeA at scale 4 when away from the bunker (|x| or |z| > 400), the hull shatters into spinning debris (±16 deg/frame, xz ±20, vy 20..85), and `ExFar` plays.
 - **Soldiers**: every state of the original switch is implemented, including walk, strafe or run circles, stand or kneel fire, grenades, the near-bunker loops, burning (run, flail, collapse, fire shrink), shot deaths by prior state, thrown deaths with roll spin, and corpse removal when pitch > 20.
   - Rifle: shot at counter 15, ExplodeF at scale 0.3, `Rifle`. Hits on rand > 24000 (26.8 %) call `world.damagePlayer(1)`.
@@ -32,6 +32,7 @@ const ground = installGround(world, fs) // before game.startLevel(...)
   - Billboards use g3d nodes 358..453, so game.ts interpolates them. The original quad is hidden and replaced by our own quad sampling an atlas of both Film sheets (306 frames, 128x128, bottom 16 rows dropped). Black is the colour key after RGB565 conversion. Tint is 0xd7d7d7 by day and 0x282828 by night. Yaw is the player yaw.
   - Burn fire: 12-slot ring, Fire64x2432 frames, base quad 280x360 at scale 0.25 x 0.5, additive.
 - **Public extras**:
+  - `GroundSystem.vehicleAt(slot)` (read-only, for tools): `{ kind, troops }`.
   - `SoldierPool.burnWithin(world, p, radius = 600)` is the burn event, for CH53 and aircraft fire events.
   - `GroundSystem.engineLoops()` returns `{ name: 'Tank' | 'Truck', volumeDb }[]` for the loops that should play this frame (d = max(|x|,|z|) of the nearest unit with state != 0, d < 6501, volume -d).
 
@@ -46,7 +47,8 @@ const ground = installGround(world, fs) // before game.startLevel(...)
 
 - **Instance chains**: `g3dscene.ts` resolves `Instance` one level only, but Geometry.3D chains them. Without a fix, Tank3..12, APC3..12, their turrets and parts, and MISSILE 472..479 have no meshes. `ground.ts` (`fillInstance`) shares the chain root's meshes for its own ids, and does nothing when a node already has meshes. The real fix belongs in `g3dscene.ts` and also affects other object runs (jets, cobras, parachutes, and so on).
 - **Projectile timing**: enemy projectiles spawn during `GroundSystem.update`, before the projectile step, so they move in the same frame. The original spawns them after projectile motion.
-- **Soldier allocator**: the original never wraps (soldier 97+ would overwrite crate objects). Here, once all 96 are used, a free slot is reused.
+- **Soldier allocator**: the original never wraps (soldier 97+ would overwrite crate objects). Here, once all 96 are used, a free slot is reused, then a corpse (state 0; corpses otherwise stay until the player looks up past 20 degrees). If all 96 are alive the soldier is not created and the meter drops by 1, so the level stays winnable. Without this, levels with more than 96 soldier spawns (86, 87) timed out with the meter stuck at 12..16 and nothing left to shoot.
+- **Grenades**: an 8-slot ring as in the original (0x462ee0, DAT_00447870): a 9th throw removes the oldest grenade still in flight.
 - **Height lookups**: soldiers and shadows use the bilinear `groundY`. The original uses the nearest heightmap cell for these.
 - **Debris**: chunks are 40 triangles of the hull mesh. The original splits the display list every 20 commands.
 - **Shadows**: shadow vertices are recomputed per tick, not interpolated.

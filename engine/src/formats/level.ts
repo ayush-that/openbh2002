@@ -313,7 +313,7 @@ export function parseLevel(text: string): LevelScript {
   return level
 }
 
-/** Script file name for a level number, as BH2.exe builds it. Levels above 99 cycle 91..100 (Level_100 does not ship). */
+/** Script file name for a level number, as BH2.exe builds it. Levels above 99 cycle 91..100; Level_100 does not ship (BH2.exe fails to load it), Game.startLevel plays Level_99 instead. */
 export function levelFileName(level: number): string {
   if (level <= 9) return `Level_0${level}`
   if (level > 99) return `Level_${(level % 10) + 91}`
