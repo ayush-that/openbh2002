@@ -94,6 +94,8 @@ const STYLE = `
 .import progress { width: min(320px, 80vw); justify-self: center; }
 .import.drag { outline: 3px dashed #c8a24a; outline-offset: -12px; }
 .import.busy .row { pointer-events: none; opacity: .4; }
+.import .legal { opacity: .5; font-size: 12px; margin: 16px 0 0; }
+.import .legal a { color: inherit; }
 `
 
 /** Opens the stored copy if there is one, else shows the import screen until a valid game is loaded. */
@@ -118,6 +120,7 @@ export async function chooseGameFS(container: HTMLElement): Promise<GameFS> {
       <p class="status" hidden></p>
       <p class="error" hidden></p>
       <input type="file" webkitdirectory hidden data-in="dir">
+      <p class="legal">Open source, <a href="https://github.com/ayush-that/openbh2002">GitHub</a>. Not affiliated with the Beach Head 2002 rights holders.</p>
     </div>`
   const root = container.querySelector<HTMLDivElement>('.import')!
   const $ = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!

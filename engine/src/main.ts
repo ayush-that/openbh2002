@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu'
 import './style.css'
 import { openDevFS, type GameFS } from './vfs'
 import { chooseGameFS } from './ui/import'
+import { initAnalytics, track } from './analytics'
 import { parseGeometry3D } from './formats/geometry3d'
 import { parseShapeData } from './formats/shapedata'
 import { G3DScene } from './render/g3dscene'
@@ -25,6 +26,7 @@ import { enterImmersive, onViewportChange } from './ui/viewport'
 
 // The original does all lighting math in gamma space (16-bit framebuffer, no sRGB). Match it.
 THREE.ColorManagement.enabled = false
+initAnalytics()
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const params = new URLSearchParams(location.search)
@@ -101,6 +103,7 @@ async function start(fs: GameFS) {
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyT' && e.shiftKey) {
       vm.toggle()
+      track('visual_mode_changed', { mode: vm.mode })
       localStorage.setItem('bh.mode', vm.mode)
     }
   })
@@ -133,6 +136,7 @@ async function start(fs: GameFS) {
     else Promise.resolve(renderer.domElement.requestPointerLock()).catch(() => {})
   }
   const ended = (status: 0 | 1) => (level: number) => {
+    track(status === 0 ? 'game_over' : 'game_quit', { level })
     setPlaying(false)
     world.sound.stopAll()
     document.exitPointerLock()
@@ -140,6 +144,14 @@ async function start(fs: GameFS) {
     void fe.show().then(play)
   }
   game.events = { onGameOver: ended(0), onQuit: ended(1) }
+  // Analytics: one event per level start, and a clear whenever the game advances in-process.
+  const startLevel = game.startLevel.bind(game)
+  game.startLevel = (n: number) => {
+    if (world.outcome === 'cleared') track('level_cleared', { level: world.levelNumber })
+    startLevel(n)
+    track('level_started', { level: n, night: !world.daytime, mode: vm.mode })
+  }
+  track('game_loaded', { backend: renderer.backend.constructor.name, preset: quality.preset, mode: vm.mode, input: game.input.mode })
   // Browsers swallow Esc while the mouse is captured and release the capture instead: treat that as Esc.
   document.addEventListener('pointerlockchange', () => {
     if (!document.pointerLockElement && !world.paused && game.input.mode === 'mouse') game.events.onQuit?.(world.levelNumber)
