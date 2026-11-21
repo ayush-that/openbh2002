@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "chiptune3": "^0.8.10",
+    "fflate": "^0.8.3",
     "three": "^0.187.0"
   }
 }
