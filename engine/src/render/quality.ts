@@ -37,7 +37,8 @@ export const PRESETS: Record<Preset, PresetDef> = {
   high: {
     remaster: { shadows: true, shadowCascades: 3, shadowMapSize: 2048, bloom: 0.5, bloomResolution: 0.5, aa: 'smaa', maxPixelRatio: 2, terrainLod: 4000 },
     anisotropy: 8,
-    minScale: 0.7,
+    // High is the default on every device, so let weak GPUs trade resolution for frame rate.
+    minScale: 0.5,
     maxScale: 1,
   },
   ultra: {
@@ -105,15 +106,13 @@ export function detectDevice(renderer: THREE.WebGPURenderer): DeviceProfile {
   }
 }
 
-/** Default visual mode and preset for a device: remaster on capable desktops, faithful elsewhere. */
+/**
+ * Default visual mode and preset: remaster at high everywhere. Adaptive render scale keeps weaker devices
+ * smooth by lowering resolution. Only software renderers (no GPU) fall back to faithful + low.
+ */
 export function recommend(d: DeviceProfile): { mode: VisualModeName; preset: Preset } {
   if (d.software) return { mode: 'faithful', preset: 'low' }
-  if (d.mobile) return { mode: 'faithful', preset: 'low' }
-  let tier = 2 // high
-  const integrated = /intel|uhd|iris|vega \d+ graphics|radeon\(tm\) graphics/.test(d.gpu)
-  if (d.cores <= 4 || (d.memory > 0 && d.memory <= 4) || integrated) tier = 1
-  if (d.backend === 'webgl2') tier--
-  return { mode: tier >= 2 ? 'remaster' : 'faithful', preset: PRESET_NAMES[Math.max(0, tier)] }
+  return { mode: 'remaster', preset: 'high' }
 }
 
 export interface QualityOptions {
