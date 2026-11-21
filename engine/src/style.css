@@ -4,6 +4,10 @@ html, body { overscroll-behavior: none; touch-action: none; user-select: none; -
 #app { position: fixed; inset: 0; overflow: hidden; }
 canvas { display: block; }
 .picker { display: grid; place-content: center; text-align: center; height: 100%; gap: 4px; padding: 0 16px; }
+.loading { position: fixed; inset: 0; z-index: 10; display: grid; place-content: center; justify-items: center; gap: clamp(16px, 5vmin, 40px); padding: 24px; background: #000; }
+.loading img { width: min(80vw, 520px, 90vh); height: auto; }
+.loading .bar { width: min(70vw, 420px); height: 6px; border-radius: 3px; background: rgb(255 255 255 / 0.15); overflow: hidden; }
+.loading .bar i { display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: #c8a24a; transition: width 0.2s; }
 .button { display: inline-block; padding: 10px 18px; background: #c8a24a; color: #111; border-radius: 6px; cursor: pointer; font-weight: 600; justify-self: center; }
 .error { color: #ff8a80; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
 .debug-hud { position: fixed; left: 8px; top: 8px; white-space: pre; font: 12px/1.4 ui-monospace, monospace; color: #e0e0e0; text-shadow: 0 1px 2px #000; pointer-events: none; }

@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu'
 import './style.css'
 import { openDevFS, type GameFS } from './vfs'
 import { chooseGameFS } from './ui/import'
+import { showLoading } from './ui/loading'
 import { initAnalytics, track } from './analytics'
 import { parseGeometry3D } from './formats/geometry3d'
 import { parseShapeData } from './formats/shapedata'
@@ -219,6 +220,13 @@ async function start(fs: GameFS) {
   Object.assign(window, { __bh: { renderer, scene, world, game, g3d, terrain, geo, vm, quality, touch, resize, backend } })
 }
 
-start((await openDevFS()) ?? (await openDevFS('https://gamedata.ayushworks.com/')) ?? (await chooseGameFS(app))).catch((e) => {
+const GAMEDATA = 'https://gamedata.ayushworks.com/'
+/** Files read before the menu appears (bar reaches the end). */
+const STARTUP_READS = 185
+const loading = showLoading(GAMEDATA + 'ui/logo.webp')
+const fs = (await openDevFS()) ?? (await openDevFS(GAMEDATA))
+if (fs) loading.track(fs, STARTUP_READS)
+else loading.remove()
+start(fs ?? (await chooseGameFS(app))).finally(loading.remove).catch((e) => {
   app.innerHTML = `<pre class="error">${(e as Error).stack ?? e}</pre>`
 })
