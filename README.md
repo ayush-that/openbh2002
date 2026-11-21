@@ -4,7 +4,7 @@ An open-source engine that plays Beach Head 2002 in the browser. It reimplements
 
 ## Play
 
-1. Open the site in a browser with WebGPU or WebGL2 (desktop or mobile).
+1. Open [bh2002.ayushworks.com](https://bh2002.ayushworks.com) in a browser with WebGPU or WebGL2 (desktop or mobile).
 2. Choose your Beach Head 2002 folder (the CD contents or an installed copy). The files stay on your device.
 
 Controls: mouse to aim, hold left button to fire, `Space` switch weapon, `m` missile, `f` flare (night), `b` bomber strike, `p` pause, `Esc` menu. `Shift+T` switches between the faithful 2001 look and the remaster.

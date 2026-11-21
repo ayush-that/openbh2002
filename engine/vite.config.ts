@@ -143,7 +143,7 @@ function videoArtifacts(): Plugin {
 }
 
 // E2E_NO_HMR=1: no hot reload, so long autoplay runs survive edits to other files.
-// BASE_PATH: public path when hosted under a subfolder (GitHub Pages: /openbh2002/).
+// BASE_PATH: public path when hosted under a subfolder (default /).
 export default defineConfig({
   base: process.env.BASE_PATH ?? '/',
   plugins: [gameData(), e2eArtifacts(), videoArtifacts()],
