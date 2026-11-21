@@ -9,7 +9,8 @@ export interface TextureOptions {
 
 export function imageTexture(width: number, height: number, rgba: Uint8Array, opts: TextureOptions = {}) {
   const tex = new THREE.DataTexture(rgba, width, height, THREE.RGBAFormat)
-  tex.colorSpace = THREE.SRGBColorSpace
+  // Gamma-space pipeline like the original renderer (see main.ts): no sRGB decode.
+  tex.colorSpace = THREE.NoColorSpace
   tex.generateMipmaps = true
   tex.minFilter = THREE.LinearMipmapLinearFilter
   tex.magFilter = THREE.LinearFilter
