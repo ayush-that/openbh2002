@@ -15,6 +15,8 @@ The game root is found anywhere in the chosen tree by looking for `BH2Game/Geome
 
 Required files (a short error lists any that are missing): `BH2Game/Geometry.3D`, `BH2Game/ShapeData`, `BH2Game/MMap1501x1501.mmap`, `BH2Game/HMap1501x1501.hmap`, `BH2Game/TerrainClose01.t24`, `Fichas/TEXMENU/ini01.tga`, `Fichas/sfx/Menu.xm`, `vehicles/apc1.3DB`.
 
+Packed textures: any `.t24`, `.r24` or opaque `.tga` may instead ship as lossless WebP named after it (`Sky1.t24.webp`). `GameFS` lists and reads it under the original name and decodes it back to the original layout (raw RGB, or an uncompressed 24-bit TGA), so nothing else in the engine knows. This roughly halves a zip of upscaled textures. A WebP is limited to 16383 px per side, so very tall sprite strips stay raw.
+
 ## Platform support
 
 From MDN browser-compat-data (November 2026).

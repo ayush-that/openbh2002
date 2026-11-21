@@ -10,14 +10,17 @@ export interface GameFS {
 }
 
 const key = (p: string) => p.replace(/\\/g, '/').replace(/^\.?\//, '').toLowerCase()
+/** A texture may ship as lossless WebP named after the original (`Sky1.t24.webp`); it stands in for `Sky1.t24`. */
+const PACKED = /\.(t24|r24|tga)\.webp$/i
+const unpacked = (p: string) => (PACKED.test(p) ? p.slice(0, -5) : p)
 
 abstract class BaseFS implements GameFS {
   protected index = new Map<string, string>()
   constructor(paths: string[]) {
-    for (const p of paths) this.index.set(key(p), p)
+    for (const p of paths) this.index.set(key(unpacked(p)), p)
   }
   list() {
-    return [...this.index.values()]
+    return [...this.index.values()].map(unpacked)
   }
   has(path: string) {
     return this.index.has(key(path))
@@ -27,7 +30,12 @@ abstract class BaseFS implements GameFS {
     if (!real) throw new Error(`Game file not found: ${path}`)
     return real
   }
-  abstract read(path: string): Promise<Uint8Array>
+  protected abstract raw(real: string): Promise<Uint8Array>
+  async read(path: string) {
+    const real = this.resolve(path)
+    const data = await this.raw(real)
+    return PACKED.test(real) ? unwebp(real, data) : data
+  }
   async text(path: string) {
     // Original files are Windows-1252 with CRLF line endings.
     return new TextDecoder('windows-1252').decode(await this.read(path)).replace(/\r\n?/g, '\n')
@@ -40,11 +48,33 @@ class HttpFS extends BaseFS {
     super(paths)
     this.base = base
   }
-  async read(path: string) {
-    const res = await fetch(this.base + this.resolve(path).split('/').map(encodeURIComponent).join('/'))
-    if (!res.ok) throw new Error(`Failed to load ${path}: ${res.status}`)
+  async raw(real: string) {
+    const res = await fetch(this.base + real.split('/').map(encodeURIComponent).join('/'))
+    if (!res.ok) throw new Error(`Failed to load ${real}: ${res.status}`)
     return new Uint8Array(await res.arrayBuffer())
   }
+}
+
+/** Decodes a packed texture back to the exact bytes of the original layout (raw RGB, or an uncompressed TGA). */
+async function unwebp(real: string, data: Uint8Array) {
+  const bmp = await createImageBitmap(new Blob([data as Uint8Array<ArrayBuffer>], { type: 'image/webp' }), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
+  const { width, height } = bmp
+  const g = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })!
+  g.drawImage(bmp, 0, 0)
+  bmp.close()
+  const px = g.getImageData(0, 0, width, height).data
+  const tga = /\.tga\.webp$/i.test(real)
+  const head = tga ? 18 : 0
+  const out = new Uint8Array(head + width * height * 3)
+  // Packed TGAs are opaque only: written back as type 2, 24-bit BGR, top-down.
+  if (tga) out.set([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, width & 255, width >> 8, height & 255, height >> 8, 24, 0x20])
+  const [r, b] = tga ? [2, 0] : [0, 2]
+  for (let i = 0, o = head; i < px.length; i += 4, o += 3) {
+    out[o + r] = px[i]
+    out[o + 1] = px[i + 1]
+    out[o + b] = px[i + 2]
+  }
+  return out
 }
 
 /** One file from any source: a picked folder, a zip, an ISO, or browser storage. */
@@ -60,8 +90,8 @@ class EntryFS extends BaseFS {
     super(entries.map((e) => e.path))
     for (const e of entries) this.entries.set(key(e.path), e)
   }
-  read(path: string) {
-    return this.entries.get(key(this.resolve(path)))!.read()
+  raw(real: string) {
+    return this.entries.get(key(real))!.read()
   }
 }
 
@@ -236,7 +266,7 @@ export function gameEntries(all: Entry[]): Entry[] {
     const k = rel.toLowerCase()
     if (NEEDED.test(k) && !SKIP.test(k)) out.push({ ...e, path: rel })
   }
-  const have = new Set(out.map((e) => key(e.path)))
+  const have = new Set(out.map((e) => key(unpacked(e.path))))
   const missing = REQUIRED.filter((r) => !have.has(key(r)))
   if (missing.length) throw new Error(`Missing game files:\n${missing.join('\n')}`)
   return out
