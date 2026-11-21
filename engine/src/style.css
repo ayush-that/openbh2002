@@ -1,9 +1,42 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #eee; font: 15px/1.4 system-ui, sans-serif; }
+/* A game, not a page: no scrolling, pull-to-refresh, pinch or double-tap zoom, selection or callouts. */
+html, body { overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+#app { position: fixed; inset: 0; overflow: hidden; }
 canvas { display: block; }
-.picker { display: grid; place-content: center; text-align: center; height: 100vh; gap: 4px; }
+.picker { display: grid; place-content: center; text-align: center; height: 100%; gap: 4px; padding: 0 16px; }
 .button { display: inline-block; padding: 10px 18px; background: #c8a24a; color: #111; border-radius: 6px; cursor: pointer; font-weight: 600; justify-self: center; }
-.error { color: #ff8a80; white-space: pre-wrap; }
+.error { color: #ff8a80; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
 .debug-hud { position: fixed; left: 8px; top: 8px; white-space: pre; font: 12px/1.4 ui-monospace, monospace; color: #e0e0e0; text-shadow: 0 1px 2px #000; pointer-events: none; }
 .debug-msg { position: fixed; inset: 0; display: grid; place-content: center; font-size: 22px; background: #0008; cursor: pointer; }
 .debug-msg[hidden] { display: none; }
 .debug-hud[hidden] { display: none; }
+
+/* Touch controls (src/ui/touch.ts). --u: small button, --s: FIRE. Sized from the shorter side, inside the safe area. */
+.touch {
+  position: fixed; inset: 0; z-index: 5; touch-action: none;
+  --u: clamp(44px, 12vmin, 88px); --s: calc(var(--u) * 1.8); --g: calc(var(--u) * 0.3);
+  --r: calc(env(safe-area-inset-right) + 3vmin); --b: calc(env(safe-area-inset-bottom) + 4vmin);
+}
+.touch[hidden], .touch [hidden] { display: none; }
+.tbtn {
+  position: absolute; box-sizing: border-box; width: var(--u); height: var(--u); border-radius: 50%;
+  display: grid; place-items: center; color: rgb(255 255 255 / 0.9);
+  background: rgb(255 255 255 / 0.12); border: 2px solid rgb(255 255 255 / 0.4);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.tbtn svg { width: 52%; height: 52%; pointer-events: none; }
+.tbtn.on { background: rgb(255 255 255 / 0.4); border-color: rgb(255 255 255 / 0.8); }
+.t-fire { width: var(--s); height: var(--s); right: var(--r); bottom: var(--b); background: rgb(255 70 40 / 0.22); border-color: rgb(255 150 120 / 0.55); }
+.t-fire.on { background: rgb(255 70 40 / 0.5); }
+.t-weapon { right: calc(var(--r) + var(--s) + var(--g)); bottom: calc(var(--b) + (var(--s) - var(--u)) / 2); }
+.t-missile { right: calc(var(--r) + var(--s) * 0.82 + var(--g) * 0.7); bottom: calc(var(--b) + var(--s) * 0.82 + var(--g) * 0.7); }
+.t-flare { right: calc(var(--r) + (var(--s) - var(--u)) / 2); bottom: calc(var(--b) + var(--s) + var(--g)); }
+.t-bombers { right: calc(var(--r) + var(--s) + var(--u) + var(--g) * 2); bottom: calc(var(--b) + (var(--s) - var(--u)) / 2); }
+.t-menu { --u: clamp(36px, 9vmin, 64px); right: var(--r); top: calc(env(safe-area-inset-top) + 12vmin); }
+.t-rotate {
+  position: absolute; left: 50%; top: 30%; width: clamp(56px, 18vmin, 120px); aspect-ratio: 1; translate: -50% -50%;
+  color: rgb(255 255 255 / 0.85); background: rgb(0 0 0 / 0.45); border-radius: 22%; display: grid; place-items: center;
+}
+.t-rotate svg { width: 62%; height: 62%; animation: t-rotate 2.4s ease-in-out infinite; }
+@keyframes t-rotate { 0%, 30% { rotate: 0deg; } 60%, 100% { rotate: -90deg; } }
+@media (prefers-reduced-motion: reduce) { .t-rotate svg { animation: none; } }

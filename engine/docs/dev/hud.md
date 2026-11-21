@@ -5,7 +5,7 @@ Reimplements `FUN_004021c4` (rects, bars, icons, banners), `FUN_00402ca5` (flat 
 ## How it works
 
 - A 2D canvas overlays the renderer canvas (`position: fixed`, `pointer-events: none`), sized to its box at `devicePixelRatio`.
-- Layout is in original screen pixels. The window maps to a virtual screen whose height is clamped to 480..600 (width at least 640). Left/top items stay fixed; right/bottom items shift by `(W-640, H-480)` of the virtual screen, exactly like the original at 800x600 or 1024x768.
+- Layout is in original screen pixels. The safe area (inside notches, from `env(safe-area-inset-*)`) maps to a virtual screen whose height is clamped to 360..600 (width at least 480). Left/top items stay fixed; right/bottom items shift by `(W-640, H-480)` of the virtual screen, exactly like the original at 800x600 or 1024x768. Between 480 and 600 px of height this is the original 1:1 mapping.
 - Rect edges and icon quads snap to device pixels, so bars stay crisp at any scale.
 - `update(world)` runs once per game frame through `game.late` and redraws. It is not called while paused, so the HUD freezes like the original (pause skips the whole render + HUD block; there is no pause indicator).
 - Resizes and DPR changes redraw from the last state.
@@ -32,6 +32,7 @@ game.late.push(hud)
 - Font: the original used the DC's default bold "System" bitmap font (16 px cell, ascent 13), not antialiased. We use bold 13 px Tahoma (fallbacks Microsoft Sans Serif, Arial) with canvas antialiasing.
 - Colours are not quantised to the original 16-bit (RGB565) framebuffer.
 - HUD scale above 600 px of window height is our choice (the original never scaled; at 1024x768 it was simply smaller).
+- Below 480 px of height (phones) the HUD stops shrinking at 360: only the empty middle gets shorter, so text stays readable. Portrait screens use a 480-wide virtual screen; at night with bombers available the bombers icon then overlaps the flares box.
 
 ## Remaining work
 

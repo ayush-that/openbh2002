@@ -165,6 +165,11 @@ export class VehicleViewer {
     if (this.initialized) this.renderer.render(this.scene, this.camera)
   }
 
+  /** Drawing-buffer pixels per 640x480 pixel (the front end's resolution multiple). */
+  setResolution(n: number) {
+    this.renderer.setPixelRatio(n)
+  }
+
   dispose() {
     this.renderer.dispose()
   }

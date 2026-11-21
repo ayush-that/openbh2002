@@ -3,13 +3,18 @@ import { decodeRaw24, toRGBA } from '../formats/raw24'
 import { CAPS, HANDGUN_ROUNDS } from './constants'
 import type { Game } from './game'
 import type { World } from './world'
+import { safeInsets } from '../ui/viewport'
 
 // In-game HUD: FUN_004021c4 (rects, bars, icons), FUN_00402ca5 (flat rect), FUN_00402d84 (icon quad) and
 // FUN_00402a1c (GDI text). Layout is in original screen pixels: left/top items fixed, right/bottom items
-// shifted by (W-640, H-480). The window is mapped to a virtual screen whose height is clamped to
-// 480..REF_HEIGHT pixels, so the HUD keeps the proportions of the original 640x480..800x600 modes.
+// shifted by (W-640, H-480). The safe area (inside notches) is mapped to a virtual screen whose height is
+// clamped to MIN_HEIGHT..REF_HEIGHT pixels, so the HUD keeps the proportions of the original 640x480..800x600
+// modes. Below 480 only the empty middle shrinks, so small phones keep readable text; narrow (portrait)
+// screens keep at least MIN_WIDTH virtual pixels so the top boxes do not overlap.
 
 const REF_HEIGHT = 600
+const MIN_HEIGHT = 360
+const MIN_WIDTH = 480
 
 /** Source rect in Icons128x128 pixels (the original uses uv = px / 127) and drawn size. */
 interface Icon {
@@ -70,11 +75,18 @@ export class Hud {
   private icons: ImageBitmap | null = null
   private state: HudState | null = null
   private resizeObserver: ResizeObserver
-  private onResize = () => this.draw()
+  private insets = safeInsets()
+  private onResize = () => {
+    this.insets = safeInsets()
+    this.draw()
+  }
   /** Device pixels per virtual HUD pixel, and the virtual screen size. */
   private k = 1
   private vw = 640
   private vh = 480
+  /** Device-pixel origin of the safe area. */
+  private x0 = 0
+  private y0 = 0
 
   /** view: the element the HUD covers (the renderer canvas). */
   constructor(view: HTMLElement, game: Game, fs: GameFS) {
@@ -129,17 +141,20 @@ export class Hud {
   }
 
   private layout() {
-    const r = this.view.getBoundingClientRect(), dpr = devicePixelRatio || 1
+    const r = this.view.getBoundingClientRect(), dpr = devicePixelRatio || 1, ins = this.insets
     const width = Math.round(r.width * dpr), height = Math.round(r.height * dpr)
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width
       this.canvas.height = height
     }
     Object.assign(this.canvas.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` })
-    const s = Math.min(r.height / Math.min(Math.max(r.height, 480), REF_HEIGHT), r.width / 640) || 1
+    const w = Math.max(1, r.width - ins.left - ins.right), h = Math.max(1, r.height - ins.top - ins.bottom)
+    const s = Math.min(h / Math.min(Math.max(h, MIN_HEIGHT), REF_HEIGHT), w / MIN_WIDTH)
     this.k = s * dpr
-    this.vw = Math.round(r.width / s)
-    this.vh = Math.round(r.height / s)
+    this.vw = Math.round(w / s)
+    this.vh = Math.round(h / s)
+    this.x0 = Math.round(ins.left * dpr)
+    this.y0 = Math.round(ins.top * dpr)
   }
 
   draw() {
@@ -190,7 +205,7 @@ export class Hud {
     const k = this.k
     const x0 = Math.round(x * k), y0 = Math.round(y * k)
     this.ctx.fillStyle = color
-    this.ctx.fillRect(x0, y0, Math.round((x + w) * k) - x0, Math.round((y + h) * k) - y0)
+    this.ctx.fillRect(this.x0 + x0, this.y0 + y0, Math.round((x + w) * k) - x0, Math.round((y + h) * k) - y0)
   }
 
   /** FUN_00402d84: textured quad, MODULATE with white diffuse, no blending. */
@@ -201,13 +216,13 @@ export class Hud {
     this.ctx.drawImage(
       this.icons,
       ic.u0 * t, ic.v0 * t, (ic.u1 - ic.u0) * t, (ic.v1 - ic.v0) * t,
-      x0, y0, Math.round((x + ic.w) * k) - x0, Math.round((y + ic.h) * k) - y0,
+      this.x0 + x0, this.y0 + y0, Math.round((x + ic.w) * k) - x0, Math.round((y + ic.h) * k) - y0,
     )
   }
 
   /** TextOutA: (x, y) is the top of the character cell. */
   private text(s: string, x: number, y: number, color: string) {
     this.ctx.fillStyle = color
-    this.ctx.fillText(s, Math.round(x * this.k), Math.round((y + FONT_ASCENT) * this.k))
+    this.ctx.fillText(s, this.x0 + Math.round(x * this.k), this.y0 + Math.round((y + FONT_ASCENT) * this.k))
   }
 }

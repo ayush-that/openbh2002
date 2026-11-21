@@ -1,6 +1,6 @@
 # Front end (menus)
 
-`src/frontend/` recreates `bh2.ews`, the original menu program, from the decompiled menu loop `FUN_00402050` (`artifacts/re/bh2ews.decomp.c`) and `artifacts/re/notes/40-frontend.md`. Every screen is drawn at 640x480 from the original `Fichas/` art and scaled to the container (letterboxed, `image-rendering: pixelated`). State numbers, rectangles, UVs, timings and flags match the original. Code comments name the original functions and globals.
+`src/frontend/` recreates `bh2.ews`, the original menu program, from the decompiled menu loop `FUN_00402050` (`artifacts/re/bh2ews.decomp.c`) and `artifacts/re/notes/40-frontend.md`. Every screen is laid out at 640x480 from the original `Fichas/` art and letterboxed into the container. The canvases hold an integer multiple of 640x480 (`ceil(scale x DPR)`, nearest-neighbour art, crisp text) that the browser smooth-scales down to fit, so pixels stay even at any size up to 4K. State numbers, rectangles, UVs, timings and flags match the original. Code comments name the original functions and globals.
 
 ## Modules
 
@@ -95,4 +95,10 @@ All four reference captures match. Mean absolute difference per channel after re
 - The game resolution field in saves and BeachheadIn is not used by the browser game.
 - Weapons-chart view modes 9/10/11 (SCHEMATIC/TESTIMONIALS/DATA) and the textures at `obj+0x474`/`obj+0x654` are never reached in the original (no state lists those actions, and nothing loads those slots), so they are not implemented.
 - The original main loop also mixes engine sounds while the menu runs (`FUN_0040e4f0`). This was not traced and is not reproduced.
-- Not yet checked: keyboard-only use (the original has none besides Esc, Backspace and typed names) and touch input.
+- Not yet checked: keyboard-only use (the original has none besides Esc, Backspace and typed names).
+
+## Touch
+
+- Pointer events throughout, `touch-action: none` on the menu layer. A tap is a press at the tap position; after release the hover position is parked off screen, so no hover lingers. Touch presses re-arm the title/nav/arrow debounces (they normally re-arm when the cursor hovers while up). The cursor sprite is hidden after a touch press.
+- Names (save slots, high scores): a hidden `<input>` is focused on the tap that selects a slot or lands in the score screen, bringing up the on-screen keyboard. It keeps a sentinel value, so `input` events become typed characters or Backspace; printable `keydown`s are still read directly (iOS, hardware keyboards). Tapping a nav button closes the keyboard.
+- `?mute` disables menu music and clicks (no audio context is created) and game sound.

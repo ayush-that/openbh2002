@@ -39,12 +39,17 @@ export class MenuAudio {
   private current = ''
   private retry = 0
 
-  constructor(fs: GameFS) {
+  private muted: boolean
+
+  /** muted: never create an audio context (the ?mute URL flag). */
+  constructor(fs: GameFS, muted = false) {
     this.fs = fs
+    this.muted = muted
   }
 
   /** Start audio from a user gesture. Safe to call repeatedly. */
   unlock() {
+    if (this.muted) return
     if (this.ctx) {
       if (this.ctx.state === 'suspended') void this.ctx.resume()
       return

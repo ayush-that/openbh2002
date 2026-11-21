@@ -1,5 +1,6 @@
 // The Beach Head 2002 front end (bh2.ews), recreated from the decompiled menu loop FUN_00402050.
-// Everything is drawn at 640x480 like the original and scaled to the container (letterboxed, pixelated).
+// Everything is laid out at 640x480 like the original and letterboxed into the container. The canvases hold an
+// integer multiple of 640x480 (nearest-neighbour art, crisp text) that the browser smooth-scales to fit.
 // State numbers, flags and timings follow the original; comments name the original globals/offsets.
 import type { GameFS } from '../vfs'
 import type { MenuAssets, Tex, Card } from './assets'
@@ -64,7 +65,7 @@ function makeCanvas(parent: HTMLElement, z: number) {
   const c = document.createElement('canvas')
   c.width = W
   c.height = H
-  Object.assign(c.style, { position: 'absolute', inset: '0', margin: 'auto', imageRendering: 'pixelated', zIndex: String(z), pointerEvents: 'none' })
+  Object.assign(c.style, { position: 'absolute', inset: '0', margin: 'auto', zIndex: String(z), pointerEvents: 'none' })
   parent.appendChild(c)
   return c
 }
@@ -91,6 +92,14 @@ export class Frontend {
   private escPressed = false
   private backspace = false
   private typed: string[] = []
+  /** Last press came from touch or pen: no cursor, no lingering hover, on-screen keyboard for names. */
+  private touch = false
+  private park = false
+  /** Time of the last printable keydown, so the hidden field does not count the same key twice. */
+  private lastKey = 0
+  private keyboard = document.createElement('input')
+  /** Canvas pixels per 640x480 pixel. */
+  private res = 1
 
   // ---- menu object (obj+0x82c ...) ----
   private state: number = S.INTRO
@@ -146,7 +155,7 @@ export class Frontend {
     this.store = store
     this.audio = audio
     this.root = document.createElement('div')
-    Object.assign(this.root.style, { position: 'absolute', inset: '0', background: '#000', cursor: 'none', overflow: 'hidden', display: 'none', zIndex: '10' })
+    Object.assign(this.root.style, { position: 'absolute', inset: '0', background: '#000', cursor: 'none', overflow: 'hidden', display: 'none', zIndex: '10', touchAction: 'none', userSelect: 'none', outline: 'none' })
     this.root.tabIndex = 0
     container.appendChild(this.root)
     this.lower = makeCanvas(this.root, 0).getContext('2d')!
@@ -226,6 +235,15 @@ export class Frontend {
   private layout() {
     const r = this.root.getBoundingClientRect()
     const scale = Math.min(r.width / W, r.height / H) || 1
+    const res = Math.min(8, Math.max(1, Math.ceil(scale * (devicePixelRatio || 1) - 0.01)))
+    for (const c of [this.lower.canvas, this.upper.canvas]) {
+      if (c.width !== W * res) {
+        c.width = W * res
+        c.height = H * res
+      }
+    }
+    this.res = res
+    this.viewer?.setResolution(res)
     for (const c of this.root.querySelectorAll('canvas')) {
       c.style.width = `${W * scale}px`
       c.style.height = `${H * scale}px`
@@ -238,30 +256,83 @@ export class Frontend {
       this.mx = Math.max(0, Math.min(W - 1, ((e.clientX - c.left) / c.width) * W))
       this.my = Math.max(0, Math.min(H - 1, ((e.clientY - c.top) / c.height) * H))
     }
-    this.root.addEventListener('pointermove', toLocal)
+    this.root.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse') this.touch = false
+      if (!this.touch || this.down) toLocal(e)
+    })
     this.root.addEventListener('pointerdown', (e) => {
+      this.touch = e.pointerType !== 'mouse'
       toLocal(e)
       if (e.button === 0) {
         this.down = true
         this.pressed = true
         this.pressAt = [this.mx, this.my]
+        // Each touch is a fresh press: the hover-to-rearm debounces assume a cursor that stays on screen.
+        if (this.touch) this.titleDebounce = this.navDebounce = this.arrowDebounce = false
       }
       this.audio.unlock()
-      this.root.focus()
+      if (!this.touch) this.root.focus()
     })
-    addEventListener('pointerup', (e) => {
-      if (e.button !== 0) return
+    const release = (e: PointerEvent) => {
+      if (e.button !== 0 && e.type === 'pointerup') return
       if (this.pressed) this.releasePending = true
       else this.down = false
-    })
+      if (e.pointerType === 'mouse') return
+      // Taps leave no hover behind, and focus brings up the on-screen keyboard where a name is typed.
+      this.park = true
+      const k = this.wantsKeyboard()
+      if (k) this.keyboard.focus({ preventScroll: true })
+      else if (k === false && document.activeElement === this.keyboard) this.root.focus()
+    }
+    addEventListener('pointerup', release)
+    addEventListener('pointercancel', release)
     this.root.addEventListener('keydown', (e) => {
       this.audio.unlock()
       if (e.key === 'Escape') this.escPressed = true
       else if (e.key === 'Backspace') this.backspace = true
-      else if (e.key.length === 1) this.typed.push(e.key)
+      else if (e.key.length === 1) {
+        this.typed.push(e.key)
+        this.lastKey = performance.now()
+      } else if (e.target === this.keyboard) return // 'Unidentified' from virtual keyboards: read the input event
       e.preventDefault()
     })
     this.root.addEventListener('contextmenu', (e) => e.preventDefault())
+
+    // Hidden text field for the on-screen keyboard. It keeps a sentinel value so Backspace always has
+    // something to delete; each input event is turned into typed characters or Backspace.
+    const k = this.keyboard, SENTINEL = '##'
+    Object.assign(k, { type: 'text', value: SENTINEL, autocomplete: 'off', spellcheck: false, enterKeyHint: 'done' })
+    k.setAttribute('autocapitalize', 'characters')
+    k.setAttribute('autocorrect', 'off')
+    k.tabIndex = -1
+    // 16px avoids the iOS zoom on focus; fixed at the top so the page does not scroll to it.
+    Object.assign(k.style, { position: 'fixed', top: '0', left: '0', width: '1px', height: '1px', opacity: '0', fontSize: '16px', pointerEvents: 'none', border: '0', padding: '0' })
+    this.root.appendChild(k)
+    const read = () => {
+      const v = k.value
+      if (performance.now() - this.lastKey > 50) {
+        if (v.length < SENTINEL.length) this.backspace = true
+        else if (v.startsWith(SENTINEL)) this.typed.push(...v.slice(SENTINEL.length))
+      }
+      k.value = SENTINEL
+      k.setSelectionRange(SENTINEL.length, SENTINEL.length)
+    }
+    k.addEventListener('input', (e) => {
+      if (!(e as InputEvent).isComposing) read()
+    })
+    k.addEventListener('compositionend', read)
+    k.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') k.blur()
+    })
+  }
+
+  /** Name entry is active under the tap at (mx, my): true focus the keyboard, false hide it, null leave it. */
+  private wantsKeyboard(): boolean | null {
+    const x = this.mx, y = this.my
+    if (L.NAV_LABELS.some((r) => this.inside(r, false))) return false
+    if (this.state === S.SCORES && this.nameRank !== -1) return true
+    if (this.state !== S.SAVE) return false
+    return L.SLOTS.some(([sx, sy]) => sx < x && x < sx + 194 && sy < y && y < sy + 20) || null
   }
 
   // ======================= drawing helpers =======================
@@ -351,8 +422,11 @@ export class Frontend {
     this.last = now
     this.dt = dt
     this.g = this.lower
-    this.lower.clearRect(0, 0, W, H)
-    this.upper.clearRect(0, 0, W, H)
+    for (const g of [this.lower, this.upper]) {
+      g.setTransform(this.res, 0, 0, this.res, 0, 0)
+      g.imageSmoothingEnabled = false
+      g.clearRect(0, 0, W, H)
+    }
     // A click that went down and up between two frames is seen where it was pressed.
     const latest: [number, number] = [this.mx, this.my]
     if (this.releasePending) [this.mx, this.my] = this.pressAt
@@ -366,6 +440,10 @@ export class Frontend {
       this.down = false
     }
     if (this.typed.length) this.typed.shift()
+    if (this.park && !this.down) {
+      this.park = false
+      this.mx = this.my = -1000
+    }
     if (result === null) {
       this.raf = requestAnimationFrame(this.frame)
       return
@@ -380,6 +458,7 @@ export class Frontend {
     cancelAnimationFrame(this.raf)
     this.audio.stopModule()
     this.viewer?.render(null, 0)
+    this.keyboard.blur()
     this.root.style.display = 'none'
     const s = this.store.settings
     const opts: PlayOptions = { level: this.level, mouseTight: s.mouseInvert === 1, mouseReverse: s.mouseMode === 1, sound: s.fx === 1 }
@@ -552,7 +631,7 @@ export class Frontend {
     if (this.state !== S.VEHICLE && this.viewer) this.viewer.render(null, 0)
     if (drawBar) this.menuBar(barSlide, barNoDropdown)
     this.g = this.state === S.VEHICLE ? this.upper : this.lower
-    this.img(this.a.cuadrados, [this.mx / W, this.my / H, 0.1, 0.13333], L.CURSOR_UV)
+    if (!this.touch) this.img(this.a.cuadrados, [this.mx / W, this.my / H, 0.1, 0.13333], L.CURSOR_UV)
     return null
   }
 
@@ -1109,7 +1188,7 @@ export class Frontend {
     if (this.viewer) return
     this.viewer = new VehicleViewer(this.fs, W, H)
     const c = this.viewer.canvas
-    Object.assign(c.style, { position: 'absolute', inset: '0', margin: 'auto', imageRendering: 'pixelated', zIndex: '1', pointerEvents: 'none' })
+    Object.assign(c.style, { position: 'absolute', inset: '0', margin: 'auto', zIndex: '1', pointerEvents: 'none' })
     this.root.insertBefore(c, this.upper.canvas)
     this.layout()
   }
