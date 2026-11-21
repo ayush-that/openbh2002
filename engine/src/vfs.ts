@@ -48,10 +48,22 @@ class HttpFS extends BaseFS {
     super(paths)
     this.base = base
   }
+  /** Retries dropped connections and server errors (common on mobile networks); a 404 fails at once. */
   async raw(real: string) {
-    const res = await fetch(this.base + real.split('/').map(encodeURIComponent).join('/'))
-    if (!res.ok) throw new Error(`Failed to load ${real}: ${res.status}`)
-    return new Uint8Array(await res.arrayBuffer())
+    const url = this.base + real.split('/').map(encodeURIComponent).join('/')
+    for (let attempt = 1; ; attempt++) {
+      let status = 0
+      try {
+        const res = await fetch(url)
+        status = res.status
+        if (res.ok) return new Uint8Array(await res.arrayBuffer())
+      } catch (e) {
+        status = 0 // also a body cut off mid-download
+        if (attempt >= 5) throw new Error(`Failed to load ${real}: ${(e as Error).message}`)
+      }
+      if (status && ((status < 500 && status !== 429) || attempt >= 5)) throw new Error(`Failed to load ${real}: ${status}`)
+      await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)))
+    }
   }
 }
 
