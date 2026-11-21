@@ -46,6 +46,10 @@ export interface Target {
   node: THREE.Object3D
   /** Ray tests only consider live targets. */
   alive(): boolean
+  /** Destroyed but still blocking shots (tank wrecks): alive() stays true, but it is no threat and makes no engine noise. */
+  wrecked?(): boolean
+  /** False while the engine loop should be silent (wrecks, parked APC1: state 0 in FUN_00424aef). Default true. */
+  engineOn?(): boolean
   /**
    * zone: ShapeData part index hit (0 vital, 1 -2 HP, 2 -1 HP for bullets).
    * weapon: what hit it. Cannon shells and missiles destroy any vehicle.
