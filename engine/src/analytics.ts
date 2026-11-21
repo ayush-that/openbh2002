@@ -12,6 +12,7 @@ export function initAnalytics() {
   if (!key || local) return
   posthog.init(key, {
     api_host: host,
+    ui_host: 'https://us.posthog.com',
     defaults: '2025-11-30',
     persistence: 'localStorage',
     autocapture: false,
