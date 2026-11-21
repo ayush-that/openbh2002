@@ -12,6 +12,7 @@ import { Game } from './game/game'
 import { OBJ } from './game/constants'
 import { DebugHud } from './debug/hud'
 import { createFrontend } from './frontend'
+import { VisualMode } from './render/remaster'
 import { Hud } from './game/hud'
 import { installFx } from './game/install-fx'
 import { installAir } from './game/enemies/install-air'
@@ -81,26 +82,14 @@ async function start(fs: GameFS) {
   const ambient = new THREE.AmbientLight(0xffffff, k / 2)
   scene.add(sun, ambient)
 
-  let remaster = params.get('mode') === 'remaster'
-  const applyMode = () => {
-    for (let id = OBJ.terrainFirst; id <= OBJ.terrainLast; id++) g3d.node(id).visible = !remaster
-    terrain.group.visible = remaster
-  }
-  applyMode()
-  addEventListener('keydown', (e) => {
-    if (e.code === 'KeyT' && e.shiftKey) {
-      remaster = !remaster
-      applyMode()
-    }
-  })
-
   const world = new World({ g3d, terrain, mmap, shapes, collision: new Collision(shapes) })
   const game = new Game(world, fs, renderer.domElement)
-  game.onDayNight = (day) => {
-    sun.visible = day
-    // Night: the sun is off and there is no ambient term, so lit geometry relies on flares and the spotlight.
-    ambient.intensity = day ? k / 2 : 0.06 * Math.PI
-  }
+  const vm = await VisualMode.create({ renderer, scene, camera: game.camera, g3d, terrain, fs, sun, ambient })
+  game.onDayNight = (day) => vm.setDayNight(day)
+  vm.setMode(params.get('mode') === 'remaster' ? 'remaster' : 'faithful')
+  addEventListener('keydown', (e) => {
+    if (e.code === 'KeyT' && e.shiftKey) vm.toggle()
+  })
   installGround(world, fs)
   installAir(world)
   const fx = await installFx(world, game, scene, fs)
@@ -160,9 +149,9 @@ async function start(fs: GameFS) {
     game.frame(now)
     fx.render(game.alpha)
     hud.update()
-    renderer.render(scene, game.camera)
+    vm.render()
   })
-  Object.assign(window, { __bh: { renderer, scene, world, game, g3d, terrain, geo, backend: renderer.backend.constructor.name } })
+  Object.assign(window, { __bh: { renderer, scene, world, game, g3d, terrain, geo, vm, backend: renderer.backend.constructor.name } })
 }
 
 start((await openDevFS()) ?? (await pickFolder())).catch((e) => {
