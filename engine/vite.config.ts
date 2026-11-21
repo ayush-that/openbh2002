@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // Dev only: serves the local game copy at /gamedata/. Game files are never bundled.
 const GAME_DIR = path.resolve(process.env.BH2002_DIR ?? '../BEACHHEAD2002')
@@ -36,4 +37,62 @@ function gameData(): Plugin {
   }
 }
 
-export default defineConfig({ plugins: [gameData()] })
+// Dev only: the autoplay harness (src/debug/autoplay.ts) posts its report and level-end screenshots here.
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
+const E2E_DIR = path.join(ROOT, 'artifacts', 'e2e')
+const MAX_BODY = 5 * 1024 * 1024
+
+function e2eArtifacts(): Plugin {
+  const readBody = (req: import('node:http').IncomingMessage) =>
+    new Promise<Buffer | null>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      let size = 0
+      req.on('data', (c: Buffer) => {
+        size += c.length
+        if (size <= MAX_BODY) chunks.push(c)
+      })
+      req.on('end', () => resolve(size > MAX_BODY ? null : Buffer.concat(chunks)))
+      req.on('error', reject)
+    })
+  const write = (name: string, data: Buffer | string) => {
+    const file = path.resolve(E2E_DIR, name)
+    if (!file.startsWith(E2E_DIR + path.sep)) throw new Error('bad path')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, data)
+    return path.relative(ROOT, file)
+  }
+  return {
+    name: 'e2e-artifacts',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const url = new URL(req.url ?? '/', 'http://x')
+        if (req.method !== 'POST' || (url.pathname !== '/__report' && url.pathname !== '/__shot')) return next()
+        const reply = (code: number, body: unknown) => {
+          res.statusCode = code
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(body))
+        }
+        try {
+          const body = await readBody(req)
+          if (!body) return reply(413, { error: 'body over 5 MB' })
+          if (url.pathname === '/__shot') {
+            const name = url.searchParams.get('name') ?? ''
+            if (!/^[\w.-]+\.png$/.test(name)) return reply(400, { error: 'bad name' })
+            return reply(200, { path: write(`shots/${name}`, body) })
+          }
+          const json = JSON.stringify(JSON.parse(body.toString('utf8')), null, 2)
+          const latest = write('latest.json', json)
+          if (url.searchParams.has('partial')) return reply(200, { path: latest })
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+          reply(200, { path: write(`report-${stamp}.json`, json) })
+        } catch (e) {
+          reply(400, { error: (e as Error).message })
+        }
+      })
+    },
+  }
+}
+
+// E2E_NO_HMR=1: no hot reload, so long autoplay runs survive edits to other files.
+export default defineConfig({ plugins: [gameData(), e2eArtifacts()], server: { hmr: !process.env.E2E_NO_HMR } })

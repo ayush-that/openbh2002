@@ -12,6 +12,7 @@ import { Game } from './game/game'
 import { OBJ } from './game/constants'
 import { DebugHud } from './debug/hud'
 import { createFrontend } from './frontend'
+import { startAutoplay } from './debug/autoplay'
 import { VisualMode } from './render/remaster'
 import { Hud } from './game/hud'
 import { installFx } from './game/install-fx'
@@ -118,7 +119,23 @@ async function start(fs: GameFS) {
     if (!document.pointerLockElement && !world.paused) game.events.onQuit?.(world.levelNumber)
   })
   game.startLevel(Number(params.get('level') ?? 1))
-  if (params.has('level')) world.paused = false
+  const auto = params.get('autoplay')
+  if (auto) {
+    // E2E: ?autoplay=1-5,9&seed=42&speed=4 plays levels through the real input path and writes artifacts/e2e reports.
+    const levels = auto.split(',').flatMap((s) => {
+      const [a, b = a] = s.split('-').map(Number)
+      return Array.from({ length: b - a + 1 }, (_, i) => a + i)
+    })
+    world.paused = false
+    startAutoplay(game, {
+      levels,
+      seed: Number(params.get('seed') ?? 1),
+      speed: Number(params.get('speed') ?? 1),
+      timeoutFrames: params.has('timeout') ? Number(params.get('timeout')) : undefined,
+      renderer,
+      onDone: (r) => console.log('autoplay done', r),
+    })
+  } else if (params.has('level')) world.paused = false
   else {
     world.paused = true
     void fe.show().then(play)
