@@ -132,7 +132,9 @@ export class G3DScene {
     for (const o of this.geo.objects) {
       const node = this.nodes.get(o.id)!
       ;(o.parent !== null ? this.nodes.get(o.parent) ?? this.root : this.root).add(node)
-      const source = o.instanceOf !== null ? byId.get(o.instanceOf)! : o
+      // Instances can chain (296 -> 295 -> 294); draw the first object that owns geometry.
+      let source = o
+      for (let hops = 0; source.instanceOf !== null && hops < 64; hops++) source = byId.get(source.instanceOf) ?? source
       for (const mesh of this.meshes(source, byId)) node.add(mesh)
     }
   }

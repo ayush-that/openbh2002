@@ -59,6 +59,8 @@ export interface Soldiers {
   rayKill(world: World, origin: THREE.Vector3, dir: THREE.Vector3, length: number): boolean
   /** Kill soldiers within radius (horizontal) of p. blown: thrown into the air (bombs, rockets). */
   killWithin(world: World, p: THREE.Vector3, radius: number, blown: boolean): void
+  /** Burn event: soldiers within radius (horizontal) of p catch fire (FUN_004154b7 burn/scatter). */
+  burnWithin(world: World, p: THREE.Vector3, radius: number): void
   /** Spawn a ground soldier or paratrooper. */
   spawn(world: World, p: THREE.Vector3, yaw: number, opts?: { paratrooper?: boolean; stagger?: number }): void
 }
@@ -112,7 +114,7 @@ export interface WorldDeps {
 
 const noopSound: Sound = { play() {}, update() {}, stopAll() {}, enabled: true }
 const noopEffects: Effects = { spawn() {}, update() {}, reset() {} }
-const noopSoldiers: Soldiers = { rayKill: () => false, killWithin() {}, spawn() {} }
+const noopSoldiers: Soldiers = { rayKill: () => false, killWithin() {}, burnWithin() {}, spawn() {} }
 
 export class World {
   frame = 0
