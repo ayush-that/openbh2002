@@ -219,6 +219,6 @@ async function start(fs: GameFS) {
   Object.assign(window, { __bh: { renderer, scene, world, game, g3d, terrain, geo, vm, quality, touch, resize, backend } })
 }
 
-start((await openDevFS()) ?? (await chooseGameFS(app))).catch((e) => {
+start((await openDevFS()) ?? (await openDevFS('https://gamedata.ayushworks.com/')) ?? (await chooseGameFS(app))).catch((e) => {
   app.innerHTML = `<pre class="error">${(e as Error).stack ?? e}</pre>`
 })
