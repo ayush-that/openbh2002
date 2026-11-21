@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { GameFS } from '../vfs'
 import type { Geometry3D, G3DObject, Polygon } from '../formats/geometry3d'
-import { decodeRaw24, toRGBA } from '../formats/raw24'
+import { decodeRaw24, toRGBA, type RawImage } from '../formats/raw24'
 import { imageTexture } from './textures'
 
 // Builds Three.js objects from Geometry.3D. One Object3D per G3D object id, parented by Link,
@@ -29,6 +29,7 @@ export interface G3DSceneObject {
 export class G3DScene {
   readonly root = new THREE.Group()
   readonly nodes = new Map<number, THREE.Object3D>()
+  private images = new Map<number, RawImage>()
   private textures = new Map<string, THREE.Texture>()
   private materials = new Map<string, THREE.Material>()
   private meshesById = new Map<number, THREE.Mesh[]>()
@@ -59,24 +60,37 @@ export class G3DScene {
   private async loadTextures(fs: GameFS) {
     await Promise.all(
       this.geo.textures.map(async (t) => {
-        const img = decodeRaw24(t.file, await fs.read(`BH2Game/${t.file}`), t.width, t.height)
-        this.textures.set(`${t.slot}`, imageTexture(img.width, img.height, toRGBA(img), { repeat: true }))
-        this.textures.set(`${t.slot}k`, imageTexture(img.width, img.height, toRGBA(img, true), { repeat: true }))
-        // Sphere maps are authored top-up; Three.js matcap samples bottom-up.
-        const flipped = toRGBA(img), row = img.width * 4
-        for (let y = 0; y < img.height / 2; y++) {
-          const top = flipped.slice(y * row, (y + 1) * row)
-          flipped.copyWithin(y * row, (img.height - 1 - y) * row, (img.height - y) * row)
-          flipped.set(top, (img.height - 1 - y) * row)
-        }
-        this.textures.set(`${t.slot}r`, imageTexture(img.width, img.height, flipped))
+        this.images.set(t.slot, decodeRaw24(t.file, await fs.read(`BH2Game/${t.file}`), t.width, t.height))
       }),
     )
   }
 
+  /** Texture variants are built on first use: most slots need only one of plain, colour-keyed and sphere map. */
   private texture(slot: number | null, variant: '' | 'k' | 'r') {
     if (!slot) return null
-    return this.textures.get(`${slot}${variant}`) ?? null
+    const key = `${slot}${variant}`
+    let tex = this.textures.get(key)
+    const img = this.images.get(slot)
+    if (!tex && img) {
+      const rgba = toRGBA(img, variant === 'k')
+      if (variant === 'r') {
+        // Sphere maps are authored top-up; Three.js matcap samples bottom-up.
+        const row = img.width * 4
+        for (let y = 0; y < img.height / 2; y++) {
+          const top = rgba.slice(y * row, (y + 1) * row)
+          rgba.copyWithin(y * row, (img.height - 1 - y) * row, (img.height - y) * row)
+          rgba.set(top, (img.height - 1 - y) * row)
+        }
+      }
+      tex = imageTexture(img.width, img.height, rgba, { repeat: variant !== 'r' })
+      this.textures.set(key, tex)
+    }
+    return tex ?? null
+  }
+
+  /** All textures in use, for anisotropy changes. */
+  allTextures() {
+    return [...this.textures.values()]
   }
 
   private material(p: Polygon, kind: Kind) {
@@ -137,6 +151,8 @@ export class G3DScene {
       for (let hops = 0; source.instanceOf !== null && hops < 64; hops++) source = byId.get(source.instanceOf) ?? source
       for (const mesh of this.meshes(source, byId)) node.add(mesh)
     }
+    // Every material exists now; the decoded files are no longer needed.
+    this.images.clear()
   }
 
   /** Meshes for an object's own polygons plus any Copy targets, cached per source id. */
@@ -149,7 +165,9 @@ export class G3DScene {
       const kind = KIND[p.polyType]
       if (!kind || p.vertices.length < 3) continue
       const m = this.material(p, kind)
-      groups.set(m, [...(groups.get(m) ?? []), p])
+      const list = groups.get(m)
+      if (list) list.push(p)
+      else groups.set(m, [p])
     }
     const meshes = [...groups].map(([m, ps]) => {
       const mesh = new THREE.Mesh(buildGeometry(ps), m)
@@ -168,25 +186,33 @@ function buildGeometry(polys: Polygon[]) {
   const pos = new Float32Array(tris * 9), nrm = new Float32Array(tris * 9), col = new Float32Array(tris * 9), uv = new Float32Array(tris * 6)
   let t = 0
   const n = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+  const face = new THREE.Vector3(), ab = new THREE.Vector3()
+  const idx = [0, 0, 0]
   for (const p of polys) {
     const [cr, cg, cb] = p.state.color ?? [255, 255, 255]
+    // Smooth parts are drawn under Color 0 0 0 with per-vertex shade: treat shade as gray level there.
+    const black = cr === 0 && cg === 0 && cb === 0
     for (let k = 1; k < p.vertices.length - 1; k++) {
-      const idx = [0, k, k + 1]
+      idx[1] = k
+      idx[2] = k + 1
       a.fromArray(p.vertices[0].position)
       b.fromArray(p.vertices[k].position)
       c.fromArray(p.vertices[k + 1].position)
-      const face = new THREE.Vector3().subVectors(c, b).cross(new THREE.Vector3().subVectors(a, b)).normalize()
+      face.subVectors(c, b).cross(ab.subVectors(a, b)).normalize()
       for (let v = 0; v < 3; v++) {
         const vert = p.vertices[idx[v]]
         const o3 = (t * 3 + v) * 3
         pos.set(vert.position, o3)
         if (vert.normal) n.fromArray(vert.normal).normalize()
         else n.copy(face)
-        nrm.set([n.x, n.y, n.z], o3)
-        // Smooth parts are drawn under Color 0 0 0 with per-vertex shade: treat shade as gray level there.
+        n.toArray(nrm, o3)
         const s = (vert.shade ?? 255) / 255
-        const black = cr === 0 && cg === 0 && cb === 0
-        col.set(black ? [s, s, s] : [(cr / 255) * s, (cg / 255) * s, (cb / 255) * s], o3)
+        if (black) col[o3] = col[o3 + 1] = col[o3 + 2] = s
+        else {
+          col[o3] = (cr / 255) * s
+          col[o3 + 1] = (cg / 255) * s
+          col[o3 + 2] = (cb / 255) * s
+        }
         const u = p.uvNormalized?.[idx[v]]
         if (u) uv.set(u, (t * 3 + v) * 2)
       }

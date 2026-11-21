@@ -15,6 +15,7 @@ import { DebugHud } from './debug/hud'
 import { createFrontend } from './frontend'
 import { startAutoplay } from './debug/autoplay'
 import { VisualMode } from './render/remaster'
+import { Quality, rendererParameters } from './render/quality'
 import { Hud } from './game/hud'
 import { installFx } from './game/install-fx'
 import { installAir } from './game/enemies/install-air'
@@ -31,8 +32,6 @@ const params = new URLSearchParams(location.search)
 const mute = params.has('mute')
 
 /** Device pixels per CSS pixel are capped at 2 and to a 4K pixel budget, then scaled by the render scale. */
-const MAX_DPR = 2
-const MAX_PIXELS = 3840 * 2160
 /** Horizontal half-angle of the original 4:3 view (HFOV 53.13 deg). */
 const TAN_HALF_HFOV = Math.tan((CAMERA.vfov / 2) * THREE.MathUtils.DEG2RAD) * (4 / 3)
 
@@ -45,27 +44,18 @@ function fitCamera(camera: THREE.PerspectiveCamera, aspect: number) {
 
 async function start(fs: GameFS) {
   app.innerHTML = ''
-  const renderer = new THREE.WebGPURenderer({ antialias: true })
+  const renderer = new THREE.WebGPURenderer(rendererParameters(params)) // ?webgl forces WebGL2
   await renderer.init()
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace
   app.appendChild(renderer.domElement)
 
-  // ---- Viewport: every size, rotation, fullscreen and DPR change goes through resize() ----
-  let renderScale = 1
+  // ---- Viewport: every size, rotation and fullscreen change goes through resize() ----
+  // Pixel ratio and render scale are owned by VisualMode/Quality (src/render), which apply them every frame.
   const onAspect: ((aspect: number) => void)[] = []
-  const pixelRatio = (w: number, h: number) =>
-    Math.max(0.25, Math.min(Math.min(devicePixelRatio || 1, MAX_DPR) * renderScale, Math.sqrt(MAX_PIXELS / Math.max(1, w * h))))
   const resize = () => {
     const w = Math.max(1, app.clientWidth), h = Math.max(1, app.clientHeight)
     renderer.setSize(w, h)
-    const pr = pixelRatio(w, h)
-    if (Math.abs(renderer.getPixelRatio() - pr) > 1e-3) renderer.setPixelRatio(pr)
     for (const f of onAspect) f(w / h)
-  }
-  /** Hook for adaptive resolution (src/render/quality.ts): 1 = full resolution. */
-  const setRenderScale = (n: number) => {
-    renderScale = n
-    resize()
   }
   resize()
 
@@ -103,9 +93,16 @@ async function start(fs: GameFS) {
   onAspect.push((a) => fitCamera(game.camera, a))
   const vm = await VisualMode.create({ renderer, scene, camera: game.camera, g3d, terrain, fs, sun, ambient })
   game.onDayNight = (day) => vm.setDayNight(day)
-  vm.setMode(params.get('mode') === 'remaster' ? 'remaster' : 'faithful')
+  const quality = new Quality({ renderer, vm, g3d, terrain })
+  // ?mode wins, then the player's last Shift+T choice, then the device recommendation.
+  const storedMode = localStorage.getItem('bh.mode')
+  const mode = params.get('mode') ?? storedMode ?? quality.recommendedMode
+  vm.setMode(mode === 'remaster' ? 'remaster' : 'faithful')
   addEventListener('keydown', (e) => {
-    if (e.code === 'KeyT' && e.shiftKey) vm.toggle()
+    if (e.code === 'KeyT' && e.shiftKey) {
+      vm.toggle()
+      localStorage.setItem('bh.mode', vm.mode)
+    }
   })
   installGround(world, fs)
   installAir(world)
@@ -197,13 +194,15 @@ async function start(fs: GameFS) {
       renderer.render(scene, fly.camera)
       return
     }
+    if (!quality.beginFrame(now)) return // frame pacing: skip simulation and render together
     game.frame(now)
     fx.render(game.alpha)
     hud.update()
     touch.update()
     vm.render()
+    quality.endFrame()
   })
-  Object.assign(window, { __bh: { renderer, scene, world, game, g3d, terrain, geo, vm, touch, resize, setRenderScale, backend: renderer.backend.constructor.name } })
+  Object.assign(window, { __bh: { renderer, scene, world, game, g3d, terrain, geo, vm, quality, touch, resize, backend: renderer.backend.constructor.name } })
 }
 
 start((await openDevFS()) ?? (await chooseGameFS(app))).catch((e) => {

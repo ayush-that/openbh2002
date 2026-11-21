@@ -9,7 +9,9 @@ OpenBH2002 reimplements Beach Head 2002 in the browser (TypeScript, Vite, Three.
 | `src/vfs.ts` | Case-insensitive read-only view of the game folder (dev server or folder picker) |
 | `src/formats/*` | Pure parsers: `geometry3d`, `shapedata`, `db3`, `level`, `raw24`, `heightmap` |
 | `src/render/g3dscene.ts` | Builds one `Object3D` per Geometry.3D object id (`g3d.node(id)`), D3D7 blend modes |
-| `src/world/terrain.ts` | Heightmap terrain (remaster) and `heightAt(x, z)` |
+| `src/render/remaster.ts` | Faithful/remaster visual modes, pixel ratio, pipeline warmup (`remaster.md`) |
+| `src/render/quality.ts` | Device presets, adaptive render scale, frame pacing (`performance.md`) |
+| `src/world/terrain.ts` | Heightmap terrain (remaster, chunked LODs) and `heightAt(x, z)` |
 | `src/game/constants.ts` | Confirmed constants (frame time, camera, caps, object ids, hit radii) |
 | `src/game/world.ts` | `World` state plus the interfaces subsystems implement: `EnemySystem`, `Target`, `Soldiers`, `Effects`, `Sound` |
 | `src/game/game.ts` | Level reset, frame order, spawn countdown, win/lose, fixed 29 ms loop with render interpolation |

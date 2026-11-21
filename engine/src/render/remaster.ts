@@ -13,7 +13,6 @@ import type { G3DScene } from './g3dscene'
 import type { Terrain } from '../world/terrain'
 import { TERRAIN } from '../world/config'
 import { OBJ } from '../game/constants'
-import { loadTileGrid } from './textures'
 
 // Two visual modes over the same scene and assets (docs/dev/remaster.md).
 // - faithful: the scene as built (gamma-space lighting, Geometry.3D terrain), drawn with renderer.render.
@@ -49,9 +48,16 @@ export interface RemasterSettings {
   vignette: number
   /** Animated glints on the sea band of the sky walls. */
   water: boolean
-  /** Multiplier on the capped device pixel ratio. */
+  /** Multiplier on the capped device pixel ratio (the adaptive quality controller drives it). */
   renderScale: number
+  /** Cap on devicePixelRatio. */
   maxPixelRatio: number
+  /** Cap on drawing-buffer pixels (8.3 M = 3840 x 2160). Applies in both modes. */
+  maxPixels: number
+  /** Terrain LOD: a chunk at distance d uses vertex stride s when s x terrainLod <= d. 0 = full detail. */
+  terrainLod: number
+  /** Bloom buffer size as a fraction of the CSS-pixel size. */
+  bloomResolution: number
 }
 
 export const DEFAULT_SETTINGS: RemasterSettings = {
@@ -69,6 +75,9 @@ export const DEFAULT_SETTINGS: RemasterSettings = {
   water: true,
   renderScale: 1,
   maxPixelRatio: 2,
+  maxPixels: 3840 * 2160,
+  terrainLod: 4000,
+  bloomResolution: 0.5,
 }
 
 export interface VisualModeOptions {
@@ -108,7 +117,7 @@ export class VisualMode {
   private o: VisualModeOptions
   private day = true
   private faithfulK: number
-  private basePixelRatio: number
+  private scenePass: ReturnType<typeof pass> | null = null
   private rsun = new THREE.DirectionalLight(0xffffff, 0)
   private hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 0)
   private csm: CSMShadowNode | null = null
@@ -123,14 +132,14 @@ export class VisualMode {
   private skyWalls = new Map<THREE.Material, number>()
   private fakeShadows: THREE.Mesh[] = []
   private terrainMaterial: THREE.Material | null = null
-  private terrainSmoothed = false
   private horizonDay: Horizon
   private horizonNight: Horizon
   private closeTex: THREE.Texture
   private farTex: THREE.Texture
-  private detailTex: THREE.Texture
+  readonly detailTex: THREE.Texture
   private detailAvg: number
   private frameTimes: number[] = []
+  private warmed = new Set<VisualModeName>()
   private lastNow = 0
 
   private uHaze = uniform(new THREE.Color())
@@ -139,20 +148,19 @@ export class VisualMode {
   private uVignette = uniform(0.2)
   private uSunGlint = uniform(1)
 
-  private constructor(o: VisualModeOptions, tex: { close: THREE.Texture; far: THREE.Texture }, day: Horizon, night: Horizon) {
+  private constructor(o: VisualModeOptions, day: Horizon, night: Horizon) {
     this.o = o
     this.settings = { ...DEFAULT_SETTINGS, ...o.settings }
     this.faithfulK = o.sun.intensity * 2
-    this.basePixelRatio = o.renderer.getPixelRatio()
-    this.closeTex = tex.close
-    this.farTex = tex.far
+    this.closeTex = o.terrain.closeTex
+    this.farTex = o.terrain.farTex
     this.horizonDay = day
     this.horizonNight = night
     // A repeating copy of the close aerial photo is the detail source (the base copy clamps at the map edge).
-    this.detailTex = tex.close.clone()
+    this.detailTex = this.closeTex.clone()
     this.detailTex.wrapS = this.detailTex.wrapT = THREE.RepeatWrapping
     this.detailTex.needsUpdate = true
-    const data = (tex.close.image as { data: Uint8Array }).data
+    const data = (this.closeTex.image as { data: Uint8Array }).data
     let sum = 0
     for (let i = 0; i < data.length; i += 4) sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]
     this.detailAvg = sum / (data.length / 4) / 255
@@ -199,14 +207,71 @@ export class VisualMode {
   }
 
   static async create(o: VisualModeOptions) {
-    const [close, far, cyl] = await Promise.all([
-      loadTileGrid(o.fs, TERRAIN.close.grid, TERRAIN.close.files),
-      loadTileGrid(o.fs, TERRAIN.far.grid, TERRAIN.far.files),
-      Promise.all(['SkyCylinder1', 'SkyCylinder2', 'SkyCylinder3', 'SkyCylinderN1', 'SkyCylinderN2'].map((n) => o.fs.read(`BH2Game/${n}.t24`))),
-    ])
+    const cyl = await Promise.all(
+      ['SkyCylinder1', 'SkyCylinder2', 'SkyCylinder3', 'SkyCylinderN1', 'SkyCylinderN2'].map((n) => o.fs.read(`BH2Game/${n}.t24`)),
+    )
     const day = horizon(cyl.slice(0, 3), 1)
     const night = horizon(cyl.slice(3), 2.2)
-    return new VisualMode(o, { close, far }, day, night)
+    return new VisualMode(o, day, night)
+  }
+
+  /** Change the render scale without touching materials or the pipeline (cheap; for the adaptive controller). */
+  setRenderScale(scale: number) {
+    this.settings.renderScale = scale
+    this.applyPixelRatio()
+  }
+
+  /** Device pixel ratio after the DPR cap, render scale and pixel cap. */
+  targetPixelRatio() {
+    const s = this.settings, size = this.o.renderer.getSize(new THREE.Vector2())
+    const pr = Math.min(devicePixelRatio || 1, s.maxPixelRatio) * s.renderScale
+    const cap = Math.sqrt(s.maxPixels / Math.max(1, size.x * size.y))
+    return Math.max(0.25, Math.min(pr, cap))
+  }
+
+  private applyPixelRatio() {
+    const { renderer } = this.o, pr = this.targetPixelRatio()
+    if (Math.abs(renderer.getPixelRatio() - pr) > 1e-3) renderer.setPixelRatio(pr)
+    this.bloomNode?.setResolutionScale(Math.min(1, this.settings.bloomResolution / renderer.getPixelRatio()))
+  }
+
+  /**
+   * Compile the pipelines of every mesh in the scene (hidden ones included: enemies, effects, debris models)
+   * for the current mode, so their first appearance does not stall a frame. Uses proxy meshes in a detached
+   * group; the scene itself is not modified, so the render loop may keep running meanwhile.
+   */
+  async warmup() {
+    const { renderer, scene, camera, terrain } = this.o
+    const group = new THREE.Group()
+    const seen = new Set<string>()
+    const remaster = this.mode === 'remaster'
+    scene.traverse((m) => {
+      if (!(m instanceof THREE.Mesh) || Array.isArray(m.material) || !m.geometry.getAttribute('position')) return
+      if (m.parent === terrain.group && !remaster) return
+      const mat = remaster ? this.remasterOf(m.material) : (this.toFaithful.get(m.material) ?? m.material)
+      if (!mat) return
+      const inst = m instanceof THREE.InstancedMesh
+      const key = `${mat.id}|${inst}|${Object.keys(m.geometry.attributes).join()}|${!!m.geometry.index}|${m.castShadow}|${m.receiveShadow}`
+      if (seen.has(key)) return
+      seen.add(key)
+      const p = inst ? new THREE.InstancedMesh(m.geometry, mat, 1) : new THREE.Mesh(m.geometry, mat)
+      p.frustumCulled = false
+      p.castShadow = m.castShadow
+      p.receiveShadow = m.receiveShadow
+      group.add(p)
+    })
+    const rt = renderer.getRenderTarget(), mrtNode = renderer.getMRT()
+    if (remaster && this.scenePass) {
+      renderer.setRenderTarget(this.scenePass.renderTarget)
+      renderer.setMRT(this.scenePass.getMRT())
+    }
+    // compileAsync captures the render target and MRT synchronously and yields between work items, so restore
+    // them before awaiting. It re-applies the captured MRT at every yield, so render() resets both each frame.
+    const done = renderer.compileAsync(group, camera, scene)
+    renderer.setRenderTarget(rt)
+    renderer.setMRT(mrtNode)
+    await done
+    return seen.size
   }
 
   /** Change settings at runtime. Material, shadow and pipeline changes rebuild lazily on the next remaster frame. */
@@ -243,13 +308,23 @@ export class VisualMode {
       this.stats.fps = 1000 / avg
     }
     this.lastNow = now
-    const { renderer, scene, camera } = this.o
+    const { renderer, scene, camera, terrain } = this.o
+    this.applyPixelRatio()
+    // First frame in each mode: compile the hidden meshes' pipelines in the background (WebGL2 compiles
+    // synchronously, so the first enemy, explosion or debris of each kind would otherwise stall 50-170 ms).
+    if (!this.warmed.has(this.mode)) {
+      this.warmed.add(this.mode)
+      void this.warmup()
+    }
     const info = renderer.info
     info.autoReset = false
     info.reset()
+    renderer.setRenderTarget(null)
+    renderer.setMRT(null)
     if (this.mode === 'faithful') {
       renderer.render(scene, camera)
     } else {
+      if (terrain.group.visible) terrain.updateLod(camera.position, this.settings.terrainLod)
       this.swapVisible()
       this.pipeline!.render()
     }
@@ -265,8 +340,8 @@ export class VisualMode {
   }
 
   private applyFaithful() {
-    const { renderer, sun, ambient, terrain } = this.o
-    renderer.setPixelRatio(this.basePixelRatio)
+    const { sun, ambient, terrain } = this.o
+    this.applyPixelRatio()
     this.terrainNodes(true)
     terrain.group.visible = false
     this.rsun.visible = this.hemi.visible = false
@@ -281,7 +356,6 @@ export class VisualMode {
 
   private applyRemaster() {
     const s = this.settings, { renderer, sun, ambient, terrain } = this.o
-    renderer.setPixelRatio(Math.min(devicePixelRatio, s.maxPixelRatio) * s.renderScale)
 
     const key = `${s.color}|${s.water}|${s.aa === 'msaa'}`
     if (key !== this.materialsKey) {
@@ -296,11 +370,8 @@ export class VisualMode {
     this.terrainNodes(!s.terrain)
     terrain.group.visible = s.terrain
     if (s.terrain) {
-      if (!this.terrainMaterial) {
-        this.terrainMaterial = this.buildTerrainMaterial()
-        if (!this.terrainSmoothed) smoothTerrainNormals(terrain)
-        this.terrainSmoothed = true
-      }
+      terrain.build()
+      this.terrainMaterial ??= this.buildTerrainMaterial()
       for (const m of terrain.group.children) {
         if (!(m instanceof THREE.Mesh)) continue
         m.material = this.terrainMaterial
@@ -328,7 +399,8 @@ export class VisualMode {
     this.rsun.castShadow = s.shadows
     if (s.shadows) {
       renderer.shadowMap.enabled = true
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap
+      // r187 removed PCFSoftShadowMap (it falls back to PCF with a warning).
+      renderer.shadowMap.type = THREE.PCFShadowMap
     }
     for (const m of this.fakeShadows) m.visible = !s.shadows
 
@@ -340,9 +412,10 @@ export class VisualMode {
     this.uSunGlint.value = this.day ? 1 : 0.6
 
     this.configureShadows()
-    const pkey = [s.color, s.toneMapping, s.haze > 0, s.bloom > 0, s.aa, s.vignette > 0, renderer.getPixelRatio()].join('|')
+    const pkey = [s.color, s.toneMapping, s.haze > 0, s.bloom > 0, s.aa, s.vignette > 0].join('|')
     if (!this.pipeline || pkey !== this.pipelineKey) this.buildPipeline(pkey)
     else if (this.bloomNode) this.bloomNode.strength.value = s.bloom
+    this.applyPixelRatio()
 
     this.swapAll()
   }
@@ -405,16 +478,23 @@ export class VisualMode {
   private swap(m: THREE.Mesh) {
     const mat = m.material
     if (Array.isArray(mat) || this.toFaithful.has(mat) || mat === this.terrainMaterial) return
+    const r = this.remasterOf(mat)
+    if (r) m.material = r
+  }
+
+  /** The remaster twin of a faithful material (built and cached on first use); remaster materials map to themselves. */
+  private remasterOf(mat: THREE.Material) {
+    if (this.toFaithful.has(mat) || mat === this.terrainMaterial) return mat
     let r = this.toRemaster.get(mat)
     if (!r) {
-      if (!mat.visible) return
+      if (!mat.visible) return null
       const built = this.twin(mat)
-      if (!built) return
+      if (!built) return null
       r = built
       this.toRemaster.set(mat, r)
       this.toFaithful.set(r, mat)
     }
-    m.material = r
+    return r
   }
 
   private lin(rgb: V3): V3 {
@@ -542,6 +622,7 @@ export class VisualMode {
     const s = this.settings, { renderer, scene, camera } = this.o
     this.pipeline?.dispose()
     const scenePass = pass(scene, camera, { samples: s.aa === 'msaa' ? 4 : 0 })
+    this.scenePass = scenePass
     if (s.bloom > 0) {
       const m = mrt({ output, emissive: vec4(0, 0, 0, 1) })
       m.setBlendMode('emissive', new THREE.BlendMode(THREE.MaterialBlending))
@@ -562,9 +643,8 @@ export class VisualMode {
       color = mix(color, this.uHaze, f)
     }
     if (s.bloom > 0) {
+      // The glow is soft anyway: it runs at a fraction of the CSS-pixel size (applyPixelRatio), not of the device size.
       this.bloomNode = bloom(scenePass.getTextureNode('emissive'), s.bloom, 0.3, 0)
-      // The glow is soft anyway: run it at half the CSS-pixel resolution, not half the device resolution.
-      this.bloomNode.setResolutionScale(Math.max(0.25, 0.5 / renderer.getPixelRatio()))
       color = color.add(this.bloomNode.rgb)
     } else this.bloomNode = null
 
@@ -586,43 +666,6 @@ export class VisualMode {
     p.outputNode = final
     this.pipeline = p
     this.pipelineKey = key
-  }
-}
-
-/**
- * Heights are 8-unit steps, so gentle far slopes show contour stripes under a low sun. Recompute the terrain
- * normals from a 5x5 box-blurred height grid (render only; heightAt and the vertex positions are unchanged).
- */
-function smoothTerrainNormals(terrain: Terrain) {
-  const { size, data } = terrain.grid
-  const r = 2, cs = TERRAIN.cellSize, hs = TERRAIN.heightScale, half = (size - 1) / 2
-  const tmp = new Float32Array(size * size), out = new Float32Array(size * size)
-  const blur = (src: ArrayLike<number>, dst: Float32Array, dx: number, dy: number) => {
-    for (let j = 0; j < size; j++) {
-      for (let i = 0; i < size; i++) {
-        let s = 0
-        for (let k = -r; k <= r; k++) {
-          const x = Math.min(size - 1, Math.max(0, i + k * dx)), y = Math.min(size - 1, Math.max(0, j + k * dy))
-          s += src[y * size + x]
-        }
-        dst[j * size + i] = s / (2 * r + 1)
-      }
-    }
-  }
-  blur(data, tmp, 1, 0)
-  blur(tmp, out, 0, 1)
-  const H = (i: number, j: number) => out[Math.min(size - 1, Math.max(0, j)) * size + Math.min(size - 1, Math.max(0, i))] * hs
-  const n = new THREE.Vector3()
-  for (const m of terrain.group.children) {
-    if (!(m instanceof THREE.Mesh)) continue
-    const pos = m.geometry.getAttribute('position') as THREE.BufferAttribute
-    const nrm = m.geometry.getAttribute('normal') as THREE.BufferAttribute
-    for (let k = 0; k < pos.count; k++) {
-      const i = Math.round(pos.getX(k) / cs + half), j = Math.round(pos.getZ(k) / cs + half)
-      n.set(H(i - 1, j) - H(i + 1, j), 2 * cs, H(i, j - 1) - H(i, j + 1)).normalize()
-      nrm.setXYZ(k, n.x, n.y, n.z)
-    }
-    nrm.needsUpdate = true
   }
 }
 

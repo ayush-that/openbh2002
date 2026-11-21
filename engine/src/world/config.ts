@@ -14,5 +14,7 @@ export const TERRAIN = {
   closeExtent: 1 / 3,
   /** Cells per mesh chunk, for frustum culling. */
   chunkCells: 100,
+  /** Vertex strides of the chunk LODs (remaster render only; heightAt always uses the full grid). */
+  lodSteps: [1, 2, 4, 10, 20],
   /** Rows run along +Z, columns along +X, origin at the map center (confirmed against Geometry.3D). */
 }
