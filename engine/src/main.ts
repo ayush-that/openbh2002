@@ -12,6 +12,7 @@ import { Game } from './game/game'
 import { OBJ } from './game/constants'
 import { DebugHud } from './debug/hud'
 import { Hud } from './game/hud'
+import { installFx } from './game/install-fx'
 
 // The original does all lighting math in gamma space (16-bit framebuffer, no sRGB). Match it.
 THREE.ColorManagement.enabled = false
@@ -97,6 +98,7 @@ async function start(fs: GameFS) {
     // Night: the sun is off and there is no ambient term, so lit geometry relies on flares and the spotlight.
     ambient.intensity = day ? k / 2 : 0.06 * Math.PI
   }
+  const fx = await installFx(world, game, scene, fs)
   await game.preload()
   game.late.push(new Hud(renderer.domElement, game, fs))
   const hud = new DebugHud(app, world, game, params.has('debug'))
@@ -129,6 +131,7 @@ async function start(fs: GameFS) {
       return
     }
     game.frame(now)
+    fx.render(game.alpha)
     hud.update()
     renderer.render(scene, game.camera)
   })

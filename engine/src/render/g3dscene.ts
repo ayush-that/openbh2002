@@ -108,6 +108,9 @@ export class G3DScene {
       if (mode === 2) [m.blendSrc, m.blendDst] = [THREE.ZeroFactor, THREE.OneMinusSrcColorFactor]
       if (mode === 3) [m.blendSrc, m.blendDst] = [THREE.ZeroFactor, THREE.SrcColorFactor]
       if (mode === 5) [m.blendSrc, m.blendDst] = [THREE.OneFactor, THREE.OneMinusSrcColorFactor]
+      // Keep framebuffer alpha at 1: mode 2 would otherwise write alpha 0 and make the canvas transparent.
+      m.blendSrcAlpha = THREE.ZeroFactor
+      m.blendDstAlpha = THREE.OneFactor
     }
     if (noDepth) {
       m.depthTest = false
