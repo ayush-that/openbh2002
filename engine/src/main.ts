@@ -11,6 +11,7 @@ import { World } from './game/world'
 import { Game } from './game/game'
 import { OBJ } from './game/constants'
 import { DebugHud } from './debug/hud'
+import { Hud } from './game/hud'
 
 // The original does all lighting math in gamma space (16-bit framebuffer, no sRGB). Match it.
 THREE.ColorManagement.enabled = false
@@ -97,7 +98,8 @@ async function start(fs: GameFS) {
     ambient.intensity = day ? k / 2 : 0.06 * Math.PI
   }
   await game.preload()
-  const hud = new DebugHud(app, world, game)
+  game.late.push(new Hud(renderer.domElement, game, fs))
+  const hud = new DebugHud(app, world, game, params.has('debug'))
   game.events = {
     onGameOver: (n) => hud.message(`DESTROYED on level ${n}. Click to restart.`, () => game.startLevel(n)),
     onQuit: (n) => hud.message(`Quit on level ${n}. Click to continue.`, () => (world.paused = false)),

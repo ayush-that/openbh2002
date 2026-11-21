@@ -1,16 +1,17 @@
 import type { World } from '../game/world'
 import type { Game } from '../game/game'
 
-/** Temporary text HUD for development. The authentic HUD replaces it. */
+/** Development overlay: state text (with ?debug) and click-through messages. */
 export class DebugHud {
   private el = document.createElement('div')
   private msg = document.createElement('div')
   private world: World
   private game: Game
 
-  constructor(parent: HTMLElement, world: World, game: Game) {
+  constructor(parent: HTMLElement, world: World, game: Game, showText: boolean) {
     this.world = world
     this.game = game
+    this.el.hidden = !showText
     this.el.className = 'debug-hud'
     this.msg.className = 'debug-msg'
     this.msg.hidden = true
@@ -18,6 +19,7 @@ export class DebugHud {
   }
 
   update() {
+    if (this.el.hidden) return
     const w = this.world, p = w.player, a = p.ammo
     const weapon = ['GUN', 'CANNON', 'HANDGUN'][p.weapon]
     this.el.textContent =
