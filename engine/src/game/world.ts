@@ -65,8 +65,10 @@ export interface Soldiers {
   killWithin(world: World, p: THREE.Vector3, radius: number, blown: boolean): void
   /** Burn event: soldiers within radius (horizontal) of p catch fire (FUN_004154b7 burn/scatter). */
   burnWithin(world: World, p: THREE.Vector3, radius: number): void
-  /** Spawn a ground soldier or paratrooper. */
-  spawn(world: World, p: THREE.Vector3, yaw: number, opts?: { paratrooper?: boolean; stagger?: number }): void
+  /** Spawn a ground soldier or paratrooper. Returns the soldier's id, or -1 when none could be spawned. */
+  spawn(world: World, p: THREE.Vector3, yaw: number, opts?: { paratrooper?: boolean; stagger?: number }): number
+  /** Remove a soldier silently (a paratrooper shot together with his parachute). */
+  remove(world: World, id: number): void
 }
 
 export type EffectKind =
@@ -118,7 +120,7 @@ export interface WorldDeps {
 
 const noopSound: Sound = { play() {}, update() {}, stopAll() {}, enabled: true }
 const noopEffects: Effects = { spawn() {}, update() {}, reset() {} }
-const noopSoldiers: Soldiers = { rayKill: () => false, killWithin() {}, burnWithin() {}, spawn() {} }
+const noopSoldiers: Soldiers = { rayKill: () => false, killWithin() {}, burnWithin() {}, spawn: () => -1, remove() {} }
 
 export class World {
   frame = 0

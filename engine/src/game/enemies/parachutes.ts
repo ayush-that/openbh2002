@@ -24,6 +24,8 @@ interface Chute {
   swing: number
   /** -1 soldier, else crate slot 0..15 (kind * 4 + ring). */
   payload: number
+  /** The paratrooper hanging below (soldier id), or -1. */
+  soldier: number
 }
 
 const _p = new THREE.Vector3()
@@ -37,7 +39,7 @@ export class Parachutes {
   private crateRing = [0, 0, 0, 0]
 
   constructor(world: World) {
-    for (let i = 0; i < POOL; i++) this.chutes.push({ node: world.g3d.node(PARACHUTE_FIRST + i), active: false, pos: new THREE.Vector3(), yaw: 0, pitch: 0, swing: 0, payload: -1 })
+    for (let i = 0; i < POOL; i++) this.chutes.push({ node: world.g3d.node(PARACHUTE_FIRST + i), active: false, pos: new THREE.Vector3(), yaw: 0, pitch: 0, swing: 0, payload: -1, soldier: -1 })
     for (let i = 0; i < 16; i++) this.crates.push(world.g3d.node(CRATE_FIRST + i))
   }
 
@@ -58,13 +60,10 @@ export class Parachutes {
     const i = this.next
     this.next = (this.next + 1) % POOL
     const c = this.chutes[i]
-    if (c.active && c.payload < 0) {
-      // The ring wraps onto a paratrooper still in the air. In BH2.exe the trooper is a soldier allocated at drop time
-      // that survives the parachute reuse, so he must not vanish (the enemy meter counts him): let him fall on his own.
-      _p.set(0, -300, 0).applyMatrix4(c.node.matrix)
-      world.soldiers.spawn(world, _p.clone(), c.yaw, { paratrooper: true })
-    }
+    // In BH2.exe the trooper is a soldier allocated at drop time, hanging 300 below the canopy and falling with it.
+    // If the ring wraps onto a chute still in the air, its trooper simply keeps falling on his own.
     c.active = true
+    c.soldier = -1
     c.pos.copy(pos)
     c.yaw = yaw
     c.pitch = 45
@@ -72,6 +71,7 @@ export class Parachutes {
     c.node.visible = true
     if (payload === 'soldier') {
       c.payload = -1
+      c.soldier = world.soldiers.spawn(world, _p.set(pos.x, pos.y - 300, pos.z), yaw, { paratrooper: true })
     } else {
       const slot = payload * 4 + this.crateRing[payload]
       this.crateRing[payload] = (this.crateRing[payload] + 1) & 3
@@ -97,9 +97,8 @@ export class Parachutes {
       if (y - 300 >= ground) continue
       c.active = false
       c.node.visible = false
-      if (c.payload < 0) {
-        world.soldiers.spawn(world, new THREE.Vector3(x, ground, z), c.yaw, { paratrooper: true })
-      } else if (this.crateOwner[c.payload] === i) {
+      // A paratrooper lands by himself (soldier state 1 -> 2) at the same moment.
+      if (c.payload >= 0 && this.crateOwner[c.payload] === i) {
         // A crate that reaches the ground is lost: only shooting the parachute gives the prize.
         this.crateOwner[c.payload] = -1
         this.crates[c.payload].visible = false
@@ -151,6 +150,7 @@ export class Parachutes {
         c.node.visible = false
         if (c.payload < 0) {
           // Paratrooper shot with his parachute.
+          if (c.soldier >= 0) world.soldiers.remove(world, c.soldier)
           world.reduceEnemyMeter(1)
           world.effects.spawn('blood', point)
           return

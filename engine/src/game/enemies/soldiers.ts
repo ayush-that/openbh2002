@@ -204,7 +204,7 @@ export class SoldierPool implements Soldiers {
       // All 96 alive: BH2.exe would write past the pool and the soldier would never be simulated, leaving the enemy
       // meter stuck above 0. Deviation: count him as gone so the level stays winnable.
       world.reduceEnemyMeter(1)
-      return
+      return -1
     }
     s.active = true
     s.x = p.x
@@ -231,6 +231,13 @@ export class SoldierPool implements Soldiers {
       s.frame = 0x57
       s.speed = 4
     }
+    return this.list.indexOf(s)
+  }
+
+  /** Only a soldier still hanging under his chute (state 1): ids are reused once a soldier dies. */
+  remove(_world: World, id: number) {
+    const s = this.list[id]
+    if (s?.active && s.state === 1) s.active = false
   }
 
   /** FUN_00424897 plus the bullet kill in FUN_004154b7. Any soldier with state > 1 stops the bullet. */
