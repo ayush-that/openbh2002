@@ -151,7 +151,9 @@ async function start(fs: GameFS) {
     startLevel(n)
     track('level_started', { level: n, night: !world.daytime, mode: vm.mode })
   }
-  track('game_loaded', { backend: renderer.backend.constructor.name, preset: quality.preset, mode: vm.mode, input: game.input.mode })
+  // Class names are minified in production builds, so read the backend flag instead.
+  const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'webgpu' : 'webgl2'
+  track('game_loaded', { backend, preset: quality.preset, mode: vm.mode, input: game.input.mode })
   // Browsers swallow Esc while the mouse is captured and release the capture instead: treat that as Esc.
   document.addEventListener('pointerlockchange', () => {
     if (!document.pointerLockElement && !world.paused && game.input.mode === 'mouse') game.events.onQuit?.(world.levelNumber)
@@ -214,7 +216,7 @@ async function start(fs: GameFS) {
     vm.render()
     quality.endFrame()
   })
-  Object.assign(window, { __bh: { renderer, scene, world, game, g3d, terrain, geo, vm, quality, touch, resize, backend: renderer.backend.constructor.name } })
+  Object.assign(window, { __bh: { renderer, scene, world, game, g3d, terrain, geo, vm, quality, touch, resize, backend } })
 }
 
 start((await openDevFS()) ?? (await chooseGameFS(app))).catch((e) => {
