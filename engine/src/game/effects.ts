@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import { clamp, float, instancedDynamicBufferAttribute, mix, texture, uv, vec2, vec4 } from 'three/tsl'
 import type { GameFS } from '../vfs'
 import type { G3DScene } from '../render/g3dscene'
-import { toRGBA } from '../formats/raw24'
+import { decodeRaw24, toRGBA } from '../formats/raw24'
 import { imageTexture } from '../render/textures'
 import { forward } from './player'
 import type { Projectile } from './projectiles'
@@ -259,15 +259,15 @@ export class EffectSystem implements Effects {
       g3d.geo.animations
         .filter((a) => a.kind === 'Animated')
         .map(async (a) => {
-          const rgb = await fs.read(`BH2Game/${a.file}`)
-          const h = a.height * a.frameCount
-          const map = imageTexture(a.width, h, toRGBA({ width: a.width, height: h, rgb }))
+          // Higher-resolution copies of the sheet (integer multiple of the declared size) load as is.
+          const img = decodeRaw24(a.file, await fs.read(`BH2Game/${a.file}`), a.width, a.height * a.frameCount)
+          const map = imageTexture(img.width, img.height, toRGBA(img))
           // Original: no mipmaps. Mipmapping a strip would also bleed neighbouring frames.
           map.generateMipmaps = false
           map.minFilter = THREE.LinearFilter
           // WebGPU rejects anisotropic samplers without linear mipmap filtering.
           map.anisotropy = 1
-          sheets.set(a.set, { map, frames: a.frameCount, h: a.height })
+          sheets.set(a.set, { map, frames: a.frameCount, h: img.height / a.frameCount })
         }),
     )
     const statics = new Map<number, THREE.Texture>()
@@ -275,8 +275,8 @@ export class EffectSystem implements Effects {
       Object.values(SLOT).map(async (slot) => {
         const t = g3d.geo.textures.find((x) => x.slot === slot)
         if (!t) throw new Error(`Geometry.3D texture slot ${slot} missing`)
-        const rgb = await fs.read(`BH2Game/${t.file}`)
-        const map = imageTexture(t.width, t.height, toRGBA({ width: t.width, height: t.height, rgb }, t.kind === 'ColorKeyed'))
+        const img = decodeRaw24(t.file, await fs.read(`BH2Game/${t.file}`), t.width, t.height)
+        const map = imageTexture(img.width, img.height, toRGBA(img, t.kind === 'ColorKeyed'))
         if (t.kind === 'ColorKeyed') {
           map.magFilter = map.minFilter = THREE.NearestFilter
           map.anisotropy = 1

@@ -13,6 +13,7 @@ import type { G3DScene } from './g3dscene'
 import type { Terrain } from '../world/terrain'
 import { TERRAIN } from '../world/config'
 import { OBJ } from '../game/constants'
+import { rawScale } from '../formats/raw24'
 
 // Two visual modes over the same scene and assets (docs/dev/remaster.md).
 // - faithful: the scene as built (gamma-space lighting, Geometry.3D terrain), drawn with renderer.render.
@@ -210,6 +211,7 @@ export class VisualMode {
     const cyl = await Promise.all(
       ['SkyCylinder1', 'SkyCylinder2', 'SkyCylinder3', 'SkyCylinderN1', 'SkyCylinderN2'].map((n) => o.fs.read(`BH2Game/${n}.t24`)),
     )
+    for (let i = 0; i < cyl.length; i++) cyl[i] = boxDown256(cyl[i])
     const day = horizon(cyl.slice(0, 3), 1)
     const night = horizon(cyl.slice(3), 2.2)
     return new VisualMode(o, day, night)
@@ -667,6 +669,23 @@ export class VisualMode {
     this.pipeline = p
     this.pipelineKey = key
   }
+}
+
+/** A 256x256 raw RGB image from a k-times larger copy (box average); original files pass through. */
+function boxDown256(d: Uint8Array) {
+  const k = rawScale(d.byteLength, 256 * 256 * 3)
+  if (k === 1) return d
+  const out = new Uint8Array(256 * 256 * 3), W = 256 * k, n = k * k
+  for (let y = 0; y < 256; y++) {
+    for (let x = 0; x < 256; x++) {
+      for (let c = 0; c < 3; c++) {
+        let s = 0
+        for (let j = 0; j < k; j++) for (let i = 0; i < k; i++) s += d[((y * k + j) * W + x * k + i) * 3 + c]
+        out[(y * 256 + x) * 3 + c] = Math.round(s / n)
+      }
+    }
+  }
+  return out
 }
 
 /** Haze colour and sea line from the sky cylinder textures: the band just above the painted sea. */
