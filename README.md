@@ -1,5 +1,7 @@
 # OpenBH2002
 
+[![OpenBH2002 gameplay](media/demo.gif)](https://bh2002.ayushworks.com)
+
 An open-source engine that plays Beach Head 2002 in the browser. It reimplements the original game from reverse-engineered behaviour and loads the original game files at runtime from a separate host. No game content is stored in this repository.
 
 ## Play
