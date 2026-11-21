@@ -11,6 +11,7 @@ import { World } from './game/world'
 import { Game } from './game/game'
 import { OBJ } from './game/constants'
 import { DebugHud } from './debug/hud'
+import { createFrontend } from './frontend'
 import { Hud } from './game/hud'
 import { installFx } from './game/install-fx'
 import { installAir } from './game/enemies/install-air'
@@ -106,11 +107,33 @@ async function start(fs: GameFS) {
   await game.preload()
   game.late.push(new Hud(renderer.domElement, game, fs))
   const hud = new DebugHud(app, world, game, params.has('debug'))
-  game.events = {
-    onGameOver: (n) => hud.message(`DESTROYED on level ${n}. Click to restart.`, () => game.startLevel(n)),
-    onQuit: (n) => hud.message(`Quit on level ${n}. Click to continue.`, () => (world.paused = false)),
+  const fe = await createFrontend(app, fs)
+  const play = (o: { level: number; mouseTight: boolean; mouseReverse: boolean; sound: boolean }) => {
+    world.player.mouseTight = o.mouseTight
+    world.player.mouseReverse = o.mouseReverse
+    world.sound.enabled = o.sound
+    game.startLevel(o.level)
+    world.paused = false
+    renderer.domElement.requestPointerLock()
   }
+  const ended = (status: 0 | 1) => (level: number) => {
+    world.paused = true
+    world.sound.stopAll()
+    document.exitPointerLock()
+    fe.gameEnded({ status, level })
+    void fe.show().then(play)
+  }
+  game.events = { onGameOver: ended(0), onQuit: ended(1) }
+  // Browsers swallow Esc while the mouse is captured and release the capture instead: treat that as Esc.
+  document.addEventListener('pointerlockchange', () => {
+    if (!document.pointerLockElement && !world.paused) game.events.onQuit?.(world.levelNumber)
+  })
   game.startLevel(Number(params.get('level') ?? 1))
+  if (params.has('level')) world.paused = false
+  else {
+    world.paused = true
+    void fe.show().then(play)
+  }
 
   const fly = params.has('fly') ? new FlyCam(new THREE.PerspectiveCamera(60, 1, 10, 80000), renderer.domElement) : null
   if (fly) fly.speed = 1500
