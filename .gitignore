@@ -1,0 +1,8 @@
+BEACHHEAD2002/
+node_modules/
+dist/
+.DS_Store
+artifacts/
+.superpowers/
+docs/superpowers/
+.vercel
