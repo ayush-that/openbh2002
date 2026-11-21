@@ -94,5 +94,53 @@ function e2eArtifacts(): Plugin {
   }
 }
 
+// Dev only: src/debug/recorder.ts appends MediaRecorder chunks here (POST /__video?name=<file>&part=<n>; part 0 truncates).
+const VIDEO_DIR = path.join(ROOT, 'artifacts', 'video')
+const MAX_VIDEO = 1024 ** 3
+
+function videoArtifacts(): Plugin {
+  return {
+    name: 'video-artifacts',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/__video', (req, res, next) => {
+        if (req.method !== 'POST') return next()
+        const url = new URL(req.url ?? '/', 'http://x')
+        const reply = (code: number, body: unknown) => {
+          if (res.headersSent) return
+          res.statusCode = code
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(body))
+        }
+        const name = url.searchParams.get('name') ?? ''
+        const part = Number(url.searchParams.get('part') ?? 0)
+        if (!/^\w[\w.-]*\.(mp4|webm)$/.test(name) || !Number.isInteger(part) || part < 0) return reply(400, { error: 'bad name or part' })
+        const file = path.join(VIDEO_DIR, name)
+        fs.mkdirSync(VIDEO_DIR, { recursive: true })
+        let size = part > 0 && fs.existsSync(file) ? fs.statSync(file).size : 0
+        const out = fs.createWriteStream(file, { flags: part > 0 ? 'a' : 'w' })
+        let failed = false
+        const fail = (code: number, error: string) => {
+          if (failed) return
+          failed = true
+          req.unpipe(out)
+          req.resume()
+          out.destroy()
+          fs.rmSync(file, { force: true })
+          reply(code, { error })
+        }
+        req.on('data', (c: Buffer) => {
+          size += c.length
+          if (size > MAX_VIDEO) fail(413, 'video over 1 GB')
+        })
+        req.on('error', (e) => fail(400, e.message))
+        out.on('error', (e) => fail(500, e.message))
+        out.on('finish', () => failed || reply(200, { path: path.relative(ROOT, file), bytes: size }))
+        req.pipe(out)
+      })
+    },
+  }
+}
+
 // E2E_NO_HMR=1: no hot reload, so long autoplay runs survive edits to other files.
-export default defineConfig({ plugins: [gameData(), e2eArtifacts()], server: { hmr: !process.env.E2E_NO_HMR } })
+export default defineConfig({ plugins: [gameData(), e2eArtifacts(), videoArtifacts()], server: { hmr: !process.env.E2E_NO_HMR } })

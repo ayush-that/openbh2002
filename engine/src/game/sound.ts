@@ -53,7 +53,7 @@ export const targetEngines: EngineProvider = (w) => {
   const out: EngineSource[] = []
   for (const t of w.targets) {
     const name = SHAPE_ENGINE[t.shape]
-    if (!name || !t.alive() || !t.node.visible) continue
+    if (!name || !t.alive() || !t.node.visible || t.engineOn?.() === false) continue
     const e = t.node.matrixWorld.elements
     const s = engineSource(name, e[12], e[14])
     if (s) out.push(s)
@@ -78,7 +78,7 @@ export class SoundSystem implements Sound {
   readonly starts: Record<string, number> = {}
   /** WAVs that failed to load or decode. */
   readonly failed: string[] = []
-  private master: GainNode
+  readonly master: GainNode
   private buffers = new Map<string, AudioBuffer>()
   private voices = new Map<string, Voice[]>()
   private next = new Map<string, number>()

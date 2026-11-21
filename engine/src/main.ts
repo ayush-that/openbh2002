@@ -149,7 +149,14 @@ async function start(fs: GameFS) {
   })
   game.startLevel(Number(params.get('level') ?? 1))
   const auto = params.get('autoplay')
-  if (auto) {
+  const record = params.get('record')
+  if (record) {
+    // Video tooling (engine/docs/dev/video.md): ?record=launch plays the scripted launch shot list into artifacts/video.
+    world.paused = true
+    void import('./debug/cinematic').then(({ recordLaunch }) =>
+      recordLaunch({ game, renderer, vm, sound: world.sound, frontend: fe, name: record }),
+    )
+  } else if (auto) {
     // E2E: ?autoplay=1-5,9&seed=42&speed=4 plays levels through the real input path and writes artifacts/e2e reports.
     const levels = auto.split(',').flatMap((s) => {
       const [a, b = a] = s.split('-').map(Number)
