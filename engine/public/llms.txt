@@ -1,0 +1,13 @@
+# OpenBH2002: Beach Head 2002 Online
+
+> Play Beach Head 2002 free in your browser at https://bh2002.ayushworks.com. OpenBH2002 is an open-source (MIT) engine that reimplements the 2001 Windows beach defence shooter Beach Head 2002 and plays its original levels, art and sounds. No download or install; works on desktop and mobile (touch controls). Faithful 2001 look plus a remaster mode.
+
+- [Play Beach Head 2002 online](https://bh2002.ayushworks.com/): opens the game; files load automatically.
+- [How to play, controls and FAQ](https://bh2002.ayushworks.com/about/)
+- [Source code on GitHub](https://github.com/ayush-that/openbh2002)
+
+## Facts
+
+- Genre: arcade shooter (fixed machine-gun position defending a beach against tanks, APCs, helicopters, jets and paratroopers).
+- Runs in browsers with WebGPU or WebGL2, built with TypeScript and Three.js.
+- Free to play. Not affiliated with the Beach Head 2002 rights holders.
