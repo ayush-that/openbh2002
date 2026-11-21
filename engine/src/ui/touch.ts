@@ -56,6 +56,10 @@ export class TouchControls {
     this.el.addEventListener('pointerup', this.up)
     this.el.addEventListener('pointercancel', this.up)
     this.el.addEventListener('contextmenu', (e) => e.preventDefault())
+    // iOS Safari ignores user-scalable=no: a second finger can start a pinch or double-tap zoom, which
+    // cancels every pointer. Blocking the touch defaults stops that without affecting pointer events.
+    for (const t of ['touchstart', 'touchmove'] as const) this.el.addEventListener(t, (e) => e.preventDefault(), { passive: false })
+    document.addEventListener('gesturestart', (e) => e.preventDefault())
     game.input.onModeChange = () => this.sync()
     addEventListener('resize', () => this.sync())
   }

@@ -48,7 +48,7 @@ export class Input {
       if (document.pointerLockElement !== el) return
       // One original pixel per 640th of the canvas width, so sensitivity matches at any window size.
       const k = 640 / Math.max(1, el.clientWidth)
-      if (this.touchCx) this.release()
+      if (this.touchCx) this.endTurn()
       this.cx = Math.max(-320, Math.min(319, this.cx + e.movementX * k))
       this.cy = softClamp(this.cy, e.movementY * k)
     })
@@ -94,10 +94,15 @@ export class Input {
 
   /** Drop any touch turn in progress and the fire button (touch controls hidden). */
   release() {
+    this.endTurn()
+    if (this.mode === 'touch') this.button = false
+  }
+
+  /** Stop the touch turn only; a held FIRE stays held. */
+  private endTurn() {
     if (this.touchCx) this.cx = 0
     this.yawLeft = 0
     this.touchCx = false
-    if (this.mode === 'touch') this.button = false
   }
 
   /** game.late, after Player.update read cx: subtract the turn it applied and set up the next frame. */
@@ -106,7 +111,7 @@ export class Input {
     if (!this.touchCx) return
     const c = this.cx
     this.yawLeft -= this.tight ? Math.abs(c / 20) * c * 0.002 : c * 0.02
-    if (Math.abs(this.yawLeft) < 1e-4) this.release()
+    if (Math.abs(this.yawLeft) < 1e-4) this.endTurn()
     else this.cx = this.rate(this.yawLeft)
   }
 
